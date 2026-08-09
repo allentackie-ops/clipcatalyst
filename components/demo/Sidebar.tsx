@@ -44,10 +44,12 @@ export default function Sidebar() {
               key={item.label}
               type="button"
               aria-current={item.active ? "page" : undefined}
+              aria-disabled={item.active ? undefined : "true"}
+              tabIndex={item.active ? undefined : -1}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
                 item.active
                   ? "bg-brand-500/10 text-white ring-1 ring-inset ring-brand-500/30"
-                  : "text-zinc-400 hover:bg-white/5 hover:text-white"
+                  : "cursor-default text-zinc-400 hover:bg-white/5 hover:text-white"
               }`}
             >
               <IconGlyph

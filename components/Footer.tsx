@@ -63,7 +63,7 @@ export default function Footer() {
                   <li key={l.label}>
                     <Link
                       href={l.href}
-                      className="text-sm text-zinc-500 transition-colors hover:text-zinc-200"
+                      className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
                     >
                       {l.label}
                     </Link>
@@ -74,10 +74,10 @@ export default function Footer() {
           ))}
         </div>
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-line pt-8 sm:flex-row">
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-zinc-500">
             © 2026 ClipCatalyst. All rights reserved.
           </p>
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-zinc-500">
             Made for creators who&apos;d rather create.
           </p>
         </div>

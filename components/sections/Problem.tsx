@@ -86,7 +86,7 @@ export default function Problem() {
 
         {/* Contrast cards */}
         <div className="mx-auto mt-14 grid max-w-4xl gap-5 md:mt-20 md:grid-cols-2 md:gap-6">
-          <Card className="p-7 sm:p-8">
+          <Card className="flex h-full flex-col p-7 sm:p-8">
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-display text-lg font-semibold text-zinc-300">
                 The old way
@@ -95,7 +95,7 @@ export default function Problem() {
                 hrs / clip
               </span>
             </div>
-            <ul className="mt-6 space-y-4">
+            <ul className="mt-6 mb-6 space-y-4">
               {OLD_WAY.map((item) => (
                 <li key={item} className="flex items-start gap-3">
                   <XMark />
@@ -105,6 +105,9 @@ export default function Problem() {
                 </li>
               ))}
             </ul>
+            <p className="mt-auto border-t border-line pt-5 font-mono text-xs uppercase tracking-[0.15em] text-zinc-600">
+              Manually. Every time.
+            </p>
           </Card>
 
           <Card className="relative overflow-hidden border-signal-500/25 p-7 sm:p-8">

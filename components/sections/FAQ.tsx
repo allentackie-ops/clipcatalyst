@@ -15,7 +15,7 @@ const faqs: { q: string; a: string }[] = [
   },
   {
     q: "Do exported clips have a watermark?",
-    a: "Only on the Free plan ($0 — 3 clips a month at 720p). Starter at $19/mo removes the watermark and unlocks 1080p plus your brand kit; Pro at $49/mo exports up to 4K.",
+    a: "Only on the Free tier — $0 for 3 clips a month at 720p, available at launch. Starter at $19/mo removes the watermark and unlocks 1080p plus your brand kit; Pro at $49/mo exports up to 4K.",
   },
   {
     q: "How does XML export work with Premiere or Resolve?",
@@ -44,9 +44,9 @@ export default function FAQ() {
           {faqs.map((faq) => (
             <details key={faq.q} className="group px-6 sm:px-8">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 [&::-webkit-details-marker]:hidden">
-                <h3 className="text-sm font-medium text-white sm:text-base">
+                <span className="text-sm font-medium text-white sm:text-base">
                   {faq.q}
-                </h3>
+                </span>
                 <svg
                   width="16"
                   height="16"

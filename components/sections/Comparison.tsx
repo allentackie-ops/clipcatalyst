@@ -37,8 +37,8 @@ const ROWS: Row[] = [
       { kind: "text", value: "4K", mono: true },
       { kind: "text", value: "1080p", mono: true },
       { kind: "text", value: "1080p", mono: true },
-      { kind: "text", value: "1080p", mono: true },
-      { kind: "text", value: "1080p", mono: true },
+      { kind: "text", value: "4K (paid)" },
+      { kind: "text", value: "4K (paid)" },
     ],
   },
   {
@@ -62,9 +62,9 @@ const ROWS: Row[] = [
     ],
   },
   {
-    feature: "All features on every paid plan",
+    feature: "AI hook variants per clip",
     cells: [
-      { kind: "yes" },
+      { kind: "text", value: "5", mono: true },
       { kind: "no" },
       { kind: "no" },
       { kind: "no" },
@@ -167,72 +167,81 @@ export default function Comparison() {
           lede="Every clipping tool promises viral moments. Here is where they actually stand — speed, quality, and what your plan really unlocks."
         />
 
-        <div className="mt-14 overflow-x-auto rounded-2xl border border-line bg-ink-900/60 md:mt-16">
-          <table className="w-full min-w-[640px] text-left">
-            <caption className="sr-only">
-              Feature comparison: ClipCatalyst versus OpusClip, Klap, VEED, and
-              Descript
-            </caption>
-            <thead>
-              <tr className="border-b border-line-strong">
-                <th
-                  scope="col"
-                  className="px-5 py-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-zinc-500"
-                >
-                  Feature
-                </th>
-                <th scope="col" className={`px-4 py-4 text-center ${highlightCell}`}>
-                  <Badge tone="brand">ClipCatalyst</Badge>
-                </th>
-                <th
-                  scope="col"
-                  className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
-                >
-                  OpusClip
-                </th>
-                <th
-                  scope="col"
-                  className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
-                >
-                  Klap
-                </th>
-                <th
-                  scope="col"
-                  className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
-                >
-                  VEED
-                </th>
-                <th
-                  scope="col"
-                  className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
-                >
-                  Descript
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {ROWS.map((row) => (
-                <tr key={row.feature}>
+        <div className="relative mt-14 md:mt-16">
+          <div className="overflow-x-auto rounded-2xl border border-line bg-ink-900/60">
+            <table className="w-full min-w-[640px] text-left">
+              <caption className="sr-only">
+                Feature comparison: ClipCatalyst versus OpusClip, Klap, VEED,
+                and Descript
+              </caption>
+              <thead>
+                <tr className="border-b border-line-strong">
                   <th
-                    scope="row"
-                    className="px-5 py-4 text-sm font-normal text-zinc-300"
+                    scope="col"
+                    className="px-5 py-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-zinc-500"
                   >
-                    {row.feature}
+                    Feature
                   </th>
-                  {row.cells.map((cell, i) => (
-                    <td
-                      key={i}
-                      className={`px-4 py-4 text-center ${i === 0 ? highlightCell : ""}`}
-                    >
-                      <CellValue cell={cell} highlight={i === 0} />
-                    </td>
-                  ))}
+                  <th scope="col" className={`px-4 py-4 text-center ${highlightCell}`}>
+                    <Badge tone="brand">ClipCatalyst</Badge>
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
+                  >
+                    OpusClip
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
+                  >
+                    Klap
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
+                  >
+                    VEED
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center text-sm font-medium text-zinc-400"
+                  >
+                    Descript
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {ROWS.map((row) => (
+                  <tr key={row.feature}>
+                    <th
+                      scope="row"
+                      className="px-5 py-4 text-sm font-normal text-zinc-300"
+                    >
+                      {row.feature}
+                    </th>
+                    {row.cells.map((cell, i) => (
+                      <td
+                        key={i}
+                        className={`px-4 py-4 text-center ${i === 0 ? highlightCell : ""}`}
+                      >
+                        <CellValue cell={cell} highlight={i === 0} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-12 rounded-r-2xl bg-gradient-to-l from-ink-900 to-transparent md:hidden"
+          />
         </div>
-        <p className="mt-4 text-xs text-zinc-600">
+        <p className="mt-3 font-mono text-xs text-zinc-400 md:hidden">
+          Swipe to compare &rarr;
+        </p>
+        <p className="mt-4 text-xs text-zinc-400">
           Based on publicly listed plans and typical processing times for a
           60-minute source video.
         </p>

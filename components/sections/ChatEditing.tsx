@@ -116,7 +116,7 @@ export default function ChatEditing() {
                 <div key={x.command} className="flex flex-col gap-3">
                   {/* User bubble */}
                   <div className="flex justify-end">
-                    <p className="max-w-[85%] rounded-2xl rounded-br-md border border-brand-500/30 bg-brand-500/15 px-4 py-2.5 text-sm leading-snug text-brand-100 sm:max-w-[75%]">
+                    <p className="max-w-[85%] rounded-2xl rounded-br-md border border-brand-500/30 bg-brand-500/15 px-4 py-2.5 text-sm leading-snug text-white sm:max-w-[75%]">
                       {x.command}
                     </p>
                   </div>
@@ -129,7 +129,7 @@ export default function ChatEditing() {
                       </p>
                       <div className="mt-2.5 flex flex-wrap items-center gap-2">
                         <ScoreDelta from={x.from} to={x.to} />
-                        <span className="font-mono text-[10px] text-zinc-600">
+                        <span className="font-mono text-[11px] text-zinc-400">
                           applied in {x.applied}
                         </span>
                       </div>

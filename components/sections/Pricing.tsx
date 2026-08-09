@@ -7,6 +7,7 @@ type Tier = {
   per?: string;
   fromPrefix?: boolean;
   features: string[];
+  limitations?: string[];
   cta: string;
   href: string;
   highlight?: boolean;
@@ -17,8 +18,9 @@ const tiers: Tier[] = [
     name: "Free",
     tagline: "Test the engine.",
     price: "$0",
-    features: ["3 clips / month", "720p export", "Watermarked clips"],
-    cta: "Start free",
+    features: ["3 clips / month"],
+    limitations: ["720p export, watermarked"],
+    cta: "Get early access",
     href: "#waitlist",
   },
   {
@@ -32,7 +34,7 @@ const tiers: Tier[] = [
       "No watermark",
       "Brand kit",
     ],
-    cta: "Choose Starter",
+    cta: "Reserve Starter",
     href: "#waitlist",
   },
   {
@@ -47,7 +49,7 @@ const tiers: Tier[] = [
       "AI hook generator",
       "Auto B-roll",
     ],
-    cta: "Go Pro",
+    cta: "Reserve Pro",
     href: "#waitlist",
     highlight: true,
   },
@@ -90,6 +92,26 @@ function CheckIcon() {
   );
 }
 
+function DashIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+      className="mt-0.5 shrink-0 text-zinc-600"
+    >
+      <path
+        d="M4.5 8h7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function TierBody({ tier }: { tier: Tier }) {
   return (
     <div className="flex h-full flex-col p-6 lg:p-7">
@@ -125,6 +147,15 @@ function TierBody({ tier }: { tier: Tier }) {
             <span>{feature}</span>
           </li>
         ))}
+        {tier.limitations?.map((limitation) => (
+          <li
+            key={limitation}
+            className="flex items-start gap-2.5 text-sm text-zinc-500"
+          >
+            <DashIcon />
+            <span>{limitation}</span>
+          </li>
+        ))}
       </ul>
 
       <div className="mt-auto pt-8">
@@ -151,7 +182,7 @@ export default function Pricing() {
         <SectionHeading
           eyebrow="Pricing"
           title="Start free. Scale when the clips hit."
-          lede="Three clips a month on the house — no credit card, no watermark surprises at checkout. Upgrade when your pipeline does."
+          lede="Three clips a month on the house — no credit card, no surprise limits at checkout. Upgrade when your pipeline does."
         />
 
         <div className="mt-14 grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:mt-16 lg:grid-cols-4 lg:gap-6">

@@ -83,7 +83,7 @@ export default function Pipeline() {
               Seven layers, <GradientText>one pipeline</GradientText>
             </>
           }
-          lede="From raw footage to published clip, every frame passes through seven specialized layers. The last one feeds results back to the first — every clip you ship makes the engine smarter."
+          lede="From raw footage to published clip, every frame passes through seven specialized layers. The last one feeds results back into scoring — every clip you ship makes the engine smarter."
         />
 
         <div className="mx-auto mt-16 max-w-3xl">
@@ -163,7 +163,7 @@ export default function Pipeline() {
                           <path d="M3 12a9 9 0 1 0 3-6.7" />
                           <path d="M3 4v5h5" />
                         </svg>
-                        results feed back into L1 scoring
+                        results feed back into L2 scoring
                       </p>
                     </div>
                   ) : (

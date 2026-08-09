@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, ScoreRing } from "@/components/ui";
 import type { Clip } from "./data";
 import CatalystChat from "./CatalystChat";
 import { IconCheck, IconPlay, IconX } from "./icons";
 
-function AnimatedCaption({ words }: { words: string[] }) {
+function AnimatedCaption({
+  words,
+  highlight,
+}: {
+  words: string[];
+  highlight: number;
+}) {
   const [active, setActive] = useState(0);
+  const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setReducedMotion(true);
+      return;
+    }
     const timer = setInterval(
       () => setActive((v) => (v + 1) % words.length),
       440
@@ -16,13 +27,15 @@ function AnimatedCaption({ words }: { words: string[] }) {
     return () => clearInterval(timer);
   }, [words.length]);
 
+  const activeWord = reducedMotion ? highlight : active;
+
   return (
     <p className="rounded-lg bg-ink-950/80 px-2.5 py-1.5 text-center text-xs font-bold leading-snug backdrop-blur-sm">
       {words.map((word, i) => (
         <span
           key={i}
           className={`transition-colors duration-150 ${
-            i === active ? "text-ember-400" : "text-white"
+            i === activeWord ? "text-ember-400" : "text-white"
           }`}
         >
           {word}
@@ -45,10 +58,16 @@ export default function DetailPanel({
   onBump: (delta: number) => void;
 }) {
   const [selectedHook, setSelectedHook] = useState(clip.recommendedHook);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
 
   return (
     <aside
       role="dialog"
+      aria-modal="true"
       aria-label={`${clip.title} — clip details`}
       className="fixed inset-0 z-50 flex animate-rise flex-col bg-ink-900 lg:static lg:z-auto lg:w-[420px] lg:shrink-0 lg:border-l lg:border-line lg:bg-ink-900/60"
     >
@@ -57,6 +76,7 @@ export default function DetailPanel({
           Clip detail
         </span>
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           aria-label="Close clip details"
@@ -84,13 +104,16 @@ export default function DetailPanel({
           <span className="absolute right-2.5 top-2.5 rounded-md bg-ink-950/70 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200 backdrop-blur-sm">
             {clip.duration}
           </span>
-          <span className="absolute inset-0 flex items-center justify-center">
+          <span aria-hidden className="absolute inset-0 flex items-center justify-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-full border border-white/25 bg-ink-950/50 backdrop-blur-sm transition hover:bg-ink-950/70">
               <IconPlay className="h-4 w-4 translate-x-[1px] text-white" />
             </span>
           </span>
           <div className="absolute inset-x-3 bottom-6">
-            <AnimatedCaption words={clip.captionWords} />
+            <AnimatedCaption
+              words={clip.captionWords}
+              highlight={clip.captionHighlight}
+            />
           </div>
           <div className="absolute inset-x-3 bottom-2.5 flex items-center gap-2">
             <div
@@ -129,7 +152,7 @@ export default function DetailPanel({
             <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-500">
               AI hooks
             </h3>
-            <span className="font-mono text-[11px] text-zinc-600">
+            <span className="font-mono text-[11px] text-zinc-400">
               5 generated
             </span>
           </div>

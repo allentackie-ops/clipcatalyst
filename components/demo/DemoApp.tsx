@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CLIPS } from "./data";
 import ClipCard, { ProcessingCard } from "./ClipCard";
 import DetailPanel from "./DetailPanel";
@@ -14,15 +14,30 @@ export default function DemoApp() {
   const [scores, setScores] = useState<Record<string, number>>(() =>
     Object.fromEntries(CLIPS.map((c) => [c.id, c.score] as const))
   );
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const selected = selectedId
     ? (CLIPS.find((c) => c.id === selectedId) ?? null)
     : null;
 
+  function select(id: string | null) {
+    if (id === null) {
+      setSelectedId(null);
+      restoreFocusRef.current?.focus();
+      restoreFocusRef.current = null;
+    } else {
+      restoreFocusRef.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      setSelectedId(id);
+    }
+  }
+
   useEffect(() => {
     if (!selected) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedId(null);
+      if (e.key === "Escape") select(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -33,7 +48,7 @@ export default function DemoApp() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-ink-950 text-zinc-100">
+    <div className="flex h-dvh overflow-hidden bg-ink-950 text-zinc-100">
       <h1 className="sr-only">ClipCatalyst live demo — sample project</h1>
 
       <Sidebar />
@@ -52,7 +67,7 @@ export default function DemoApp() {
               type="button"
               onClick={() => setShowBanner(false)}
               aria-label="Dismiss demo mode banner"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-brand-300 transition hover:bg-white/10 hover:text-white"
+              className="-m-1.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-brand-300 transition hover:bg-white/10 hover:text-white"
             >
               <IconX className="h-3.5 w-3.5" />
             </button>
@@ -78,7 +93,7 @@ export default function DemoApp() {
                 </div>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white/5 px-3 py-1.5 text-xs text-zinc-300 transition hover:border-brand-400/50 hover:text-white"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-white/5 px-3 py-2 text-xs text-zinc-300 transition hover:border-brand-400/50 hover:text-white"
                 >
                   Sort: Score
                   <IconChevronDown className="h-3.5 w-3.5" />
@@ -86,10 +101,10 @@ export default function DemoApp() {
               </div>
 
               <div
-                className={`grid gap-5 ${
+                className={`grid gap-3 sm:gap-5 ${
                   selected
-                    ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2"
-                    : "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"
+                    ? "grid-cols-2 lg:grid-cols-1 xl:grid-cols-2"
+                    : "grid-cols-2 sm:grid-cols-2 xl:grid-cols-3"
                 }`}
               >
                 {CLIPS.map((clip) => (
@@ -98,13 +113,13 @@ export default function DemoApp() {
                     clip={clip}
                     score={scores[clip.id] ?? clip.score}
                     selected={clip.id === selectedId}
-                    onSelect={() => setSelectedId(clip.id)}
+                    onSelect={() => select(clip.id === selectedId ? null : clip.id)}
                   />
                 ))}
                 <ProcessingCard />
               </div>
 
-              <p className="mt-8 text-center font-mono text-[11px] text-zinc-600">
+              <p className="mt-8 text-center font-mono text-[11px] text-zinc-400">
                 Sample data · nothing here uploads or posts
               </p>
             </div>
@@ -115,7 +130,7 @@ export default function DemoApp() {
               key={selected.id}
               clip={selected}
               score={scores[selected.id] ?? selected.score}
-              onClose={() => setSelectedId(null)}
+              onClose={() => select(null)}
               onBump={(delta) => bump(selected.id, delta)}
             />
           ) : null}

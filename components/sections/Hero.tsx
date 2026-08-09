@@ -1,10 +1,27 @@
 import { Badge, Button, Container, GradientText, ScoreRing } from "@/components/ui";
 
 const STATS = [
-  { value: "<90s", label: "median processing" },
+  { value: "<90s", label: "median time" },
   { value: "4K", label: "max export" },
   { value: "0–100", label: "virality score" },
-  { value: "1-click", label: "publish" },
+  { value: "10GB", label: "max upload" },
+];
+
+const WAVEFORM = [
+  "h-1.5",
+  "h-3",
+  "h-2",
+  "h-4",
+  "h-2.5",
+  "h-5",
+  "h-3",
+  "h-4",
+  "h-2",
+  "h-3.5",
+  "h-1.5",
+  "h-2.5",
+  "h-3",
+  "h-1.5",
 ];
 
 export default function Hero() {
@@ -28,7 +45,7 @@ export default function Hero() {
                 aria-hidden
                 className="h-1.5 w-1.5 rounded-full bg-signal-400 animate-pulse-soft"
               />
-              Now in public beta
+              Early access &mdash; waitlist open
             </Badge>
 
             <h1 className="mt-6 font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl lg:leading-[1.05]">
@@ -46,7 +63,7 @@ export default function Hero() {
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <Button href="#waitlist" size="lg">
-                Start free &mdash; 3 clips/month
+                Get early access
               </Button>
               <Button href="/demo" variant="secondary" size="lg">
                 <svg
@@ -99,12 +116,14 @@ export default function Hero() {
               aria-hidden
               className="absolute right-0 top-1/2 z-0 aspect-[9/16] w-32 -translate-y-[42%] rotate-6 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-ink-700 via-ink-850 to-ember-500/20 opacity-90 shadow-xl shadow-black/40 sm:w-36 lg:w-40"
             >
-              <span className="absolute right-2.5 top-2.5 rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
-                81
-              </span>
-              <span className="absolute left-2.5 top-2.5 rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
-                0:58
-              </span>
+              <div className="absolute right-2.5 top-2.5 flex flex-col items-end gap-1.5">
+                <span className="rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
+                  81
+                </span>
+                <span className="rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+                  0:58
+                </span>
+              </div>
               <div className="absolute inset-x-3 bottom-4 space-y-1.5">
                 <div className="mx-auto h-2 w-3/4 rounded-full bg-white/15" />
                 <div className="mx-auto h-2 w-1/2 rounded-full bg-white/10" />
@@ -136,13 +155,29 @@ export default function Hero() {
                 aria-hidden
                 className="absolute left-1/2 top-[26%] h-24 w-20 -translate-x-1/2 rounded-xl border border-brand-400/50"
               >
+                {/* blurred subject silhouette */}
+                <div className="absolute inset-0 overflow-hidden rounded-xl">
+                  <div className="absolute left-1/2 top-10 h-14 w-16 -translate-x-1/2 rounded-[2.5rem] bg-brand-300/20 blur-sm" />
+                  <div className="absolute left-1/2 top-2.5 h-7 w-7 -translate-x-1/2 rounded-full bg-brand-300/25 blur-sm" />
+                </div>
                 <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded border border-line bg-ink-950/90 px-1.5 font-mono text-[8px] uppercase tracking-[0.15em] text-brand-300">
                   face lock
                 </span>
               </div>
 
-              {/* bottom stack: captions, platforms, scrubber */}
+              {/* bottom stack: waveform, captions, platforms, scrubber */}
               <div className="absolute inset-x-3 bottom-3 flex flex-col items-center gap-2.5">
+                <div
+                  aria-hidden
+                  className="flex h-5 items-center justify-center gap-[3px]"
+                >
+                  {WAVEFORM.map((height, i) => (
+                    <span
+                      key={i}
+                      className={`w-[3px] rounded-full bg-white/20 ${height}`}
+                    />
+                  ))}
+                </div>
                 <p className="flex flex-col items-center gap-1 text-center font-display text-[13px] font-bold leading-none text-white">
                   <span className="rounded-md bg-black/60 px-2 py-1">
                     we hit a million views

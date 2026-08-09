@@ -131,7 +131,7 @@ export default function CatalystChat({
           <IconSpark className="h-3 w-3 text-white" />
         </span>
         <span className="text-sm font-medium text-white">Catalyst</span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-600">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-400">
           AI editor
         </span>
         <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] text-zinc-500">
@@ -223,7 +223,7 @@ export default function CatalystChat({
           onChange={(e) => setInput(e.target.value)}
           placeholder="Tell Catalyst what to change…"
           aria-label="Message Catalyst"
-          className="min-w-0 flex-1 rounded-full border border-line bg-ink-950/60 px-4 py-2.5 text-[13px] text-zinc-300 placeholder:text-zinc-600 focus:border-brand-500/50 focus:outline-none"
+          className="min-w-0 flex-1 rounded-full border border-line bg-ink-950/60 px-4 py-2.5 text-[13px] text-zinc-300 placeholder:text-zinc-600 focus:border-brand-400/70 focus:outline-none focus:ring-2 focus:ring-brand-400/40"
         />
         <button
           type="submit"

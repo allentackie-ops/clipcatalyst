@@ -26,10 +26,12 @@ export default function TopBar() {
         </span>
       </div>
 
-      <Badge tone="signal" className="hidden shrink-0 sm:inline-flex">
-        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-signal-400" />
-        Processing complete
-      </Badge>
+      <span className="hidden shrink-0 sm:block">
+        <Badge tone="brand">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand-400" />
+          6 of 7 ready
+        </Badge>
+      </span>
 
       <Button className="shrink-0">
         <IconDownload className="h-4 w-4" />

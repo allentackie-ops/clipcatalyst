@@ -144,14 +144,14 @@ export default function ViralityEngine() {
           lede="Every clip gets a 0–100 virality score. Underneath it, four systems decide what to cut, what to say first, and how to say it — then tell you exactly how to push the number higher."
         />
 
-        <div className="mt-16 grid items-start gap-10 lg:grid-cols-[1.08fr_1fr] lg:gap-12">
+        <div className="mt-16 grid items-stretch gap-10 lg:grid-cols-[1.08fr_1fr] lg:gap-12">
           {/* Engine readout panel */}
           <Card className="overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
               <div className="min-w-0">
                 <p className="truncate font-mono text-xs text-zinc-300">
-                  founder-podcast-ep42.mp4{" "}
+                  seed-round-stories.mp4{" "}
                   <span className="text-zinc-600">·</span>{" "}
                   <span className="text-zinc-500">clip 03</span>
                 </p>
@@ -267,9 +267,9 @@ export default function ViralityEngine() {
           </Card>
 
           {/* Capability cards */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid h-full gap-4 sm:grid-cols-2">
             {CAPABILITIES.map((cap) => (
-              <Card key={cap.name} className="p-5 sm:p-6">
+              <Card key={cap.name} className="h-full p-5 sm:p-6">
                 <div
                   className={`flex h-10 w-10 items-center justify-center rounded-xl border ${cap.tile}`}
                 >

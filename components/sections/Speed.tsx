@@ -158,7 +158,7 @@ export default function Speed() {
                     </div>
                   ) : (
                     <div
-                      className={`h-full rounded-lg border border-line bg-ink-600/50 ${row.width}`}
+                      className={`h-full rounded-lg bg-zinc-700/70 ${row.width}`}
                     />
                   )}
                 </div>
@@ -179,7 +179,7 @@ export default function Speed() {
             </div>
           </div>
 
-          <p className="mt-6 font-mono text-xs text-zinc-600 sm:mt-4">
+          <p className="mt-6 font-mono text-xs text-zinc-400 sm:mt-4">
             Median processing time · 1080p source · 10 clips per batch
           </p>
         </Card>

@@ -34,7 +34,7 @@ export default function ClipCard({
     <button
       type="button"
       onClick={onSelect}
-      aria-pressed={selected}
+      aria-expanded={selected}
       className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-ink-850/80 text-left transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 ${
         selected
           ? "border-brand-400/60 ring-1 ring-brand-400/40"
@@ -72,7 +72,7 @@ export default function ClipCard({
       <span className="flex flex-1 flex-col gap-2.5 p-3.5">
         <span className="flex items-start justify-between gap-2.5">
           <span className="block min-w-0">
-            <span className="block text-sm font-medium leading-snug text-white">
+            <span className="block text-[13px] font-medium leading-snug text-white sm:text-sm">
               {clip.title}
             </span>
             <span className="mt-1 block font-mono text-[11px] text-zinc-500">

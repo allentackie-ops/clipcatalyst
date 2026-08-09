@@ -319,14 +319,14 @@ export default function Features() {
         <SectionHeading
           eyebrow="Everything in the box"
           title="The whole clipping stack, built in"
-          lede="Nine core features on every plan — including free. Eight Pro tools your current editor can't touch."
+          lede="Nine core features in every workflow, eight Pro tools your current editor can't match."
         />
 
         <div className="mt-14 md:mt-16">
           <GroupHeading
             badge="Core"
             tone="neutral"
-            label="Every plan"
+            label="The core stack"
             count={CORE_FEATURES.length}
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

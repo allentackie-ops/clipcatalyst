@@ -89,7 +89,7 @@ export default function FinalCTA() {
             </p>
             <WaitlistForm />
             <p className="mt-6 font-mono text-xs tracking-wide text-zinc-500">
-              Free tier · No credit card · First clip in 90 seconds
+              Free tier at launch · No credit card · First clip in 90 seconds
             </p>
           </div>
         </div>

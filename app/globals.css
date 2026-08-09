@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  /* Ink — page + surface scale (dark studio look) */
+  --color-ink-950: #07070c;
+  --color-ink-900: #0b0b13;
+  --color-ink-850: #0f0f19;
+  --color-ink-800: #14141f;
+  --color-ink-700: #1b1b2a;
+  --color-ink-600: #262637;
+
+  /* Brand — catalyst violet */
+  --color-brand-300: #c4b5fd;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+
+  /* Spark — reaction accents */
+  --color-spark-400: #e879f9; /* fuchsia */
+  --color-spark-500: #d946ef;
+  --color-ember-400: #fbbf24; /* amber */
+  --color-ember-500: #f59e0b;
+
+  /* Signal — success/score */
+  --color-signal-400: #34d399;
+  --color-signal-500: #10b981;
+
+  /* Lines & text */
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --animate-marquee: marquee 40s linear infinite;
+  --animate-pulse-soft: pulse-soft 3s ease-in-out infinite;
+  --animate-rise: rise 0.6s ease-out both;
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-ink-950);
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: var(--color-brand-600);
+  color: white;
+}
+
+/* Thin custom scrollbar for panels in the demo app */
+.cc-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.cc-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+.cc-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

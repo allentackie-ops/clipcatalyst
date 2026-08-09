@@ -1,0 +1,87 @@
+import Link from "next/link";
+import { Container, Logo } from "@/components/ui";
+
+const columns: { title: string; links: { label: string; href: string }[] }[] = [
+  {
+    title: "Product",
+    links: [
+      { label: "Virality Engine", href: "#virality-engine" },
+      { label: "Chat editing", href: "#chat-editing" },
+      { label: "Features", href: "#features" },
+      { label: "Pricing", href: "#pricing" },
+      { label: "Live demo", href: "/demo" },
+    ],
+  },
+  {
+    title: "Compare",
+    links: [
+      { label: "vs. OpusClip", href: "#compare" },
+      { label: "vs. Klap", href: "#compare" },
+      { label: "vs. VEED", href: "#compare" },
+      { label: "vs. Descript", href: "#compare" },
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      { label: "How it works", href: "#how-it-works" },
+      { label: "Under the hood", href: "#pipeline" },
+      { label: "FAQ", href: "#faq" },
+      { label: "API docs", href: "#waitlist" },
+    ],
+  },
+  {
+    title: "Company",
+    links: [
+      { label: "About", href: "#" },
+      { label: "Blog", href: "#" },
+      { label: "Affiliates — 20% lifetime", href: "#" },
+      { label: "Contact", href: "#" },
+    ],
+  },
+];
+
+export default function Footer() {
+  return (
+    <footer className="border-t border-line bg-ink-900/60">
+      <Container className="py-14">
+        <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(4,1fr)]">
+          <div>
+            <Logo />
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-zinc-500">
+              Studio-quality AI clips in 90 seconds. Built for podcasters,
+              streamers, and the teams behind them.
+            </p>
+          </div>
+          {columns.map((col) => (
+            <div key={col.title}>
+              <h3 className="mb-4 text-sm font-semibold text-white">
+                {col.title}
+              </h3>
+              <ul className="space-y-2.5">
+                {col.links.map((l) => (
+                  <li key={l.label}>
+                    <Link
+                      href={l.href}
+                      className="text-sm text-zinc-500 transition-colors hover:text-zinc-200"
+                    >
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-line pt-8 sm:flex-row">
+          <p className="text-xs text-zinc-600">
+            © 2026 ClipCatalyst. All rights reserved.
+          </p>
+          <p className="text-xs text-zinc-600">
+            Made for creators who&apos;d rather create.
+          </p>
+        </div>
+      </Container>
+    </footer>
+  );
+}

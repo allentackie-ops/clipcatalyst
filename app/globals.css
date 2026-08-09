@@ -54,9 +54,11 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 
 body {
+  overflow-x: clip;
   background-color: var(--color-ink-950);
   color: #f4f4f5;
   font-family: var(--font-sans);

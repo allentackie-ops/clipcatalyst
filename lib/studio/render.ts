@@ -2,12 +2,26 @@
 // 9:16 canvas, overlays animated word captions + watermark + progress bar, and
 // records canvas.captureStream + silently-captured audio with MediaRecorder.
 
+import { cropCenterAt } from "./croptrack";
+import type { CropTrack } from "./croptrack";
 import type {
   ClipPlan,
   RenderOptions,
   RenderResult,
   TranscriptWord,
 } from "./types";
+
+/**
+ * Render options plus the optional camera move.
+ *
+ * `RenderOptions` stays the frozen shared contract; the track is renderer-only
+ * and optional, so existing callers keep compiling and keep their exact
+ * behaviour (a centered crop).
+ */
+export type RenderClipOptions = RenderOptions & {
+  /** Crop track from `buildCropTrack`. Absent → today's centered crop. */
+  track?: CropTrack;
+};
 
 const MIME_PREFERENCES = [
   'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
@@ -37,6 +51,10 @@ type LayoutLine = { words: LayoutWord[]; width: number };
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 /** Group caption words into short strips: ≤ 4 words and ≤ 18 chars each. */
@@ -158,7 +176,7 @@ function pickMimeType(): string | undefined {
 export async function renderClip(
   source: { url: string },
   plan: ClipPlan,
-  options: RenderOptions,
+  options: RenderClipOptions,
   onProgress?: (progress: number) => void
 ): Promise<RenderResult> {
   if (typeof MediaRecorder === "undefined") {
@@ -359,15 +377,21 @@ export async function renderClip(
     const lineHeight = fontSize * 1.3;
     const maxTextWidth = width * 0.86 - padX * 2;
 
-    const drawVideoFrame = () => {
+    const track = options.track;
+
+    const drawVideoFrame = (t: number) => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0) {
-        // Cover-crop: scale to fill the 9:16 frame, crop the overflow, centered.
+        // Cover-crop: scale to fill the 9:16 frame, crop the overflow.
         const scale = Math.max(width / vw, height / vh);
         const sw = width / scale;
         const sh = height / scale;
-        const sx = (vw - sw) / 2;
+        // Horizontal: follow the crop track when there is one, else centered.
+        // The track's cx is the subject center as a fraction of source width.
+        const sx = track
+          ? clamp(cropCenterAt(track, t) * vw - sw / 2, 0, Math.max(0, vw - sw))
+          : (vw - sw) / 2;
         const sy = (vh - sh) / 2;
         ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
       } else {
@@ -457,7 +481,7 @@ export async function renderClip(
     }
 
     // Paint the first frame before recording starts so clips never open black.
-    drawVideoFrame();
+    drawVideoFrame(0);
     drawOverlays(0);
     onProgress?.(0);
 
@@ -477,7 +501,7 @@ export async function renderClip(
       const drawNow = () => {
         const t = video.currentTime - plan.start;
         try {
-          drawVideoFrame();
+          drawVideoFrame(t);
           drawOverlays(t);
         } catch {
           // Stalled decoder — keep the last painted frame and carry on.

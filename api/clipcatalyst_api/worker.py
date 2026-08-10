@@ -1,6 +1,7 @@
 """The Celery task that runs the whole pipeline for one job.
 
-probe → transcribe → analyze → render, mirroring the browser Studio's stages.
+probe → transcribe → analyze → reframe → render, mirroring the browser
+Studio's stages.
 Progress is persisted on the job row (throttled) so `GET /v1/jobs/{id}` can
 stream honest progress. Every failure lands in status=failed with a friendly,
 user-presentable error string.
@@ -16,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from celery.exceptions import SoftTimeLimitExceeded
 
 from . import db
+from .pipeline.croptrack import CropTrack, CropTrackOptions, build_crop_track
+from .pipeline.facetrack import detect_faces
 from .pipeline.highlights import plan_clips
 from .pipeline.probe import probe_media
 from .pipeline.render import render_clip
@@ -50,6 +53,10 @@ _TIMEOUT_ERROR = (
     "This video took too long to process and was stopped. Try a shorter clip "
     "count or a shorter source video."
 )
+
+# Every clip is cut to 9:16; the source aspect decides how wide that window is.
+_TARGET_ASPECT = 9 / 16
+_DEFAULT_SOURCE_ASPECT = 16 / 9
 
 
 class _Throttle:
@@ -142,7 +149,7 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail="Reading the video",
         error=None,
     )
-    probe_media(src, settings)
+    info = probe_media(src, settings)
 
     # --- transcribe ------------------------------------------------------
     db.update_job(
@@ -183,9 +190,67 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail=f"Planned {len(plans)} clip{'s' if len(plans) != 1 else ''}",
     )
 
+    total = len(plans)
+
+    # --- reframe (best-effort: every failure degrades to a centered crop) --
+    # Detection runs for all clips before rendering starts so the stage the UI
+    # shows advances once instead of alternating reframe → render → reframe.
+    source_aspect = (
+        info.width / info.height
+        if info.width > 0 and info.height > 0
+        else _DEFAULT_SOURCE_ASPECT
+    )
+    tracks: list[CropTrack | None] = []
+
+    for index, plan in enumerate(plans):
+        base = index / total
+        detail = f"Finding the speaker in clip {index + 1} of {total}"
+        db.update_job(job_id, stage="reframe", progress=round(base, 4), detail=detail)
+
+        reframe_throttle = _Throttle()
+
+        def on_detect_progress(p: float, base: float = base, detail: str = detail) -> None:
+            if reframe_throttle.ready():
+                overall = base + min(1.0, max(0.0, p)) / total
+                db.update_job(
+                    job_id, stage="reframe", progress=round(overall, 4), detail=detail
+                )
+
+        try:
+            samples = detect_faces(
+                src, plan.start, plan.end, settings, on_detect_progress
+            )
+            tracks.append(
+                build_crop_track(
+                    samples,
+                    CropTrackOptions(
+                        duration=max(0.1, plan.end - plan.start),
+                        target_aspect=_TARGET_ASPECT,
+                        source_aspect=source_aspect,
+                    ),
+                )
+            )
+        except Exception:
+            # A clip that can't be tracked still renders — centered, as before.
+            logger.warning(
+                "job %s: reframe for clip %d/%d failed; using a centered crop",
+                job_id,
+                index + 1,
+                total,
+                exc_info=True,
+            )
+            tracks.append(None)
+
+    tracked = sum(1 for t in tracks if t is not None and t.coverage > 0)
+    db.update_job(
+        job_id,
+        stage="reframe",
+        progress=1.0,
+        detail=f"Tracked the speaker in {tracked} of {total} clip{'s' if total != 1 else ''}",
+    )
+
     # --- render (sequential, per-clip failure isolation) -----------------
     opts = RenderOptions(height=int(job["height"]))
-    total = len(plans)
     clips: list[dict] = []
     failed_count = 0
 
@@ -206,7 +271,9 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
                 )
 
         try:
-            rendered = render_clip(src, plan, out_path, opts, settings, on_render_progress)
+            rendered = render_clip(
+                src, plan, out_path, opts, settings, on_render_progress, tracks[index]
+            )
             storage.put_clip(job_id, rendered.path, name)
         except PipelineError as exc:
             failed_count += 1

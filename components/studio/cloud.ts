@@ -22,7 +22,12 @@ export type JobStatus =
   | "failed";
 
 /** Processing sub-stages persisted on the job row (mirrors the browser). */
-export type CloudStage = "probe" | "transcribe" | "analyze" | "render";
+export type CloudStage =
+  | "probe"
+  | "transcribe"
+  | "analyze"
+  | "reframe"
+  | "render";
 
 export type CreateJobRequest = {
   filename: string;

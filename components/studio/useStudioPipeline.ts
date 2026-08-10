@@ -1,14 +1,18 @@
 "use client";
 
 // Orchestrates the in-browser clipping pipeline:
-// decode audio → transcribe (worker) → plan highlights → render clips.
+// decode audio → transcribe (worker) → plan highlights → reframe → render clips.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { decodeToMono16k, computeAudioFeatures } from "@/lib/studio/audio";
+import { buildCropTrack } from "@/lib/studio/croptrack";
+import type { CropTrack } from "@/lib/studio/croptrack";
+import { detectFaces } from "@/lib/studio/facetrack";
 import { planClips } from "@/lib/studio/highlights";
 import { renderClip } from "@/lib/studio/render";
 import { MAX_SOURCE_SECONDS, formatDuration } from "./format";
 import type {
+  ClipPlan,
   FinishedClip,
   HighlightOptions,
   PipelineProgress,
@@ -35,6 +39,80 @@ declare global {
   interface Window {
     /** E2E hook: bypasses Whisper with a pre-baked transcript. */
     __CC_TEST_TRANSCRIPT?: Transcript;
+  }
+}
+
+/** Output aspect of every clip (9:16). Sets how wide the crop window is. */
+const TARGET_ASPECT = 9 / 16;
+/** Used when the source's intrinsic size can't be read — the common case. */
+const DEFAULT_SOURCE_ASPECT = 16 / 9;
+const METADATA_TIMEOUT_MS = 15_000;
+
+/**
+ * Intrinsic width/height of the source, needed to size the crop window.
+ *
+ * Resolves to 16:9 on any failure or timeout rather than rejecting: an
+ * unreadable aspect must not stop the run, it just means a slightly
+ * mis-sized pan range that `renderClip` clamps anyway.
+ */
+function probeSourceAspect(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") {
+      resolve(DEFAULT_SOURCE_ASPECT);
+      return;
+    }
+    const video = document.createElement("video");
+    let settled = false;
+    const finish = (aspect: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch {
+        /* ignore */
+      }
+      resolve(aspect > 0 && Number.isFinite(aspect) ? aspect : DEFAULT_SOURCE_ASPECT);
+    };
+    const timer = setTimeout(() => finish(DEFAULT_SOURCE_ASPECT), METADATA_TIMEOUT_MS);
+    video.preload = "metadata";
+    video.muted = true;
+    video.onloadedmetadata = () => finish(video.videoWidth / video.videoHeight);
+    video.onerror = () => finish(DEFAULT_SOURCE_ASPECT);
+    video.src = url;
+  });
+}
+
+/**
+ * Face-track one clip, degrading to a centered crop on any trouble.
+ *
+ * `detectFaces` already swallows its own failures (returning `[]`, which
+ * `buildCropTrack` turns into a centered track); the try/catch here is the
+ * backstop for anything unexpected. Reframing is an enhancement — it must
+ * never be the reason a clip doesn't get rendered.
+ */
+async function trackForClip(
+  sourceUrl: string,
+  plan: ClipPlan,
+  sourceAspect: number,
+  onProgress: (progress: number) => void,
+  signal: AbortSignal
+): Promise<CropTrack | undefined> {
+  try {
+    const samples = await detectFaces(
+      { url: sourceUrl },
+      plan,
+      onProgress,
+      signal
+    );
+    return buildCropTrack(samples, {
+      duration: Math.max(0.1, plan.end - plan.start),
+      targetAspect: TARGET_ASPECT,
+      sourceAspect,
+    });
+  } catch {
+    return undefined; // undefined ⇒ renderClip keeps its centered crop
   }
 }
 
@@ -80,15 +158,18 @@ export function useStudioPipeline() {
   const runningRef = useRef(false);
   const abortedRef = useRef(false);
   const workerRef = useRef<Worker | null>(null);
+  const detectAbortRef = useRef<AbortController | null>(null);
 
-  // Unmount: stop the worker, drop every object URL, and silence any
-  // in-flight pipeline (all setStates below check abortedRef).
+  // Unmount: stop the worker, cut face detection short, drop every object URL,
+  // and silence any in-flight pipeline (all setStates below check abortedRef).
   useEffect(() => {
     abortedRef.current = false;
     return () => {
       abortedRef.current = true;
       workerRef.current?.terminate();
       workerRef.current = null;
+      detectAbortRef.current?.abort();
+      detectAbortRef.current = null;
       for (const u of urlsRef.current) URL.revokeObjectURL(u);
       urlsRef.current = [];
     };
@@ -108,6 +189,9 @@ export function useStudioPipeline() {
     async (file: File, settings: StudioSettings) => {
       if (runningRef.current) return;
       runningRef.current = true;
+
+      const detectAbort = new AbortController();
+      detectAbortRef.current = detectAbort;
 
       const onProgress = (progress: PipelineProgress) =>
         safeSetState({ status: "running", progress });
@@ -156,6 +240,50 @@ export function useStudioPipeline() {
         }
         if (abortedRef.current) return;
 
+        // --- reframe: one camera move per clip, best-effort ----------------
+        // Detection runs for every clip before any rendering starts so the
+        // checklist advances once instead of ping-ponging reframe→render.
+        onProgress({
+          stage: "reframe",
+          progress: 0,
+          clipIndex: 1,
+          clipCount: plans.length,
+          detail: `Finding the speaker in clip 1 of ${plans.length}`,
+        });
+        const sourceAspect = await probeSourceAspect(sourceUrl);
+        if (abortedRef.current) return;
+
+        const tracks: (CropTrack | undefined)[] = [];
+        for (let i = 0; i < plans.length; i++) {
+          if (abortedRef.current) return;
+          const base = i / plans.length;
+          const detail = `Finding the speaker in clip ${i + 1} of ${plans.length}`;
+          onProgress({
+            stage: "reframe",
+            progress: base,
+            clipIndex: i + 1,
+            clipCount: plans.length,
+            detail,
+          });
+          tracks.push(
+            await trackForClip(
+              sourceUrl,
+              plans[i],
+              sourceAspect,
+              (p) =>
+                onProgress({
+                  stage: "reframe",
+                  progress: base + Math.min(1, Math.max(0, p)) / plans.length,
+                  clipIndex: i + 1,
+                  clipCount: plans.length,
+                  detail,
+                }),
+              detectAbort.signal
+            )
+          );
+        }
+        if (abortedRef.current) return;
+
         // Render each clip independently: one bad render shouldn't sink the batch.
         const clips: FinishedClip[] = [];
         let lastRenderError: unknown = null;
@@ -166,7 +294,11 @@ export function useStudioPipeline() {
             const result = await renderClip(
               { url: sourceUrl },
               plan,
-              { height: settings.height, watermark: settings.watermark },
+              {
+                height: settings.height,
+                watermark: settings.watermark,
+                track: tracks[i],
+              },
               (p) =>
                 onProgress({
                   stage: "render",
@@ -201,6 +333,7 @@ export function useStudioPipeline() {
           message: e instanceof Error ? e.message : "Something went wrong while processing.",
         });
       } finally {
+        if (detectAbortRef.current === detectAbort) detectAbortRef.current = null;
         runningRef.current = false;
       }
     },

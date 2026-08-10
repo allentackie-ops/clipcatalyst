@@ -1,6 +1,6 @@
 "use client";
 
-// Running state: the five-stage pipeline checklist with live progress.
+// Running state: the six-stage pipeline checklist with live progress.
 
 import { useMemo } from "react";
 import { Button, Card } from "@/components/ui";
@@ -11,8 +11,12 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "model", label: "Load AI model" },
   { id: "transcribe", label: "Transcribe" },
   { id: "analyze", label: "Score moments" },
+  { id: "reframe", label: "Reframe on the speaker" },
   { id: "render", label: "Render clips" },
 ];
+
+/** Stages that report per-clip progress, so the meta line shows "clip i/n". */
+const PER_CLIP_STAGES: ReadonlySet<StageId> = new Set<StageId>(["reframe", "render"]);
 
 /** Screen-reader announcements — one per stage transition, never per-frame. */
 const STAGE_ANNOUNCEMENTS: Record<StageId, string> = {
@@ -165,7 +169,7 @@ export default function StageChecklist({
                     </p>
                     {active ? (
                       <p className="shrink-0 font-mono text-xs text-zinc-400">
-                        {stage.id === "render" &&
+                        {PER_CLIP_STAGES.has(stage.id) &&
                         progress.clipIndex &&
                         progress.clipCount
                           ? `clip ${progress.clipIndex}/${progress.clipCount}${

@@ -6,6 +6,9 @@ redis
 pydantic
 python-multipart
 imageio-ffmpeg
+# Face detection for the reframe stage. Pinned <5: 4.x bundles the Haar
+# cascades at cv2.data.haarcascades, 5.x dropped them (we ship no weights).
+opencv-python-headless<5
 # boto3 lives here (not worker-only) because BOTH roles need it in S3 mode
 # (CC_STORAGE=s3): the api mints presigned PUT/GET URLs, the worker uploads
 # clips + stages the source. One image, so one place to declare it. Pulls in

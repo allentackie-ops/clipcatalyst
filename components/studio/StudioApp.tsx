@@ -49,6 +49,7 @@ const CLOUD_STAGE_IDS: readonly CloudStage[] = [
   "probe",
   "transcribe",
   "analyze",
+  "reframe",
   "render",
 ];
 
@@ -60,6 +61,7 @@ const CLOUD_CHECKLIST: { id: CloudChecklistStage; label: string }[] = [
   { id: "probe", label: "Probe video" },
   { id: "transcribe", label: "Transcribe" },
   { id: "analyze", label: "Score moments" },
+  { id: "reframe", label: "Reframe on the speaker" },
   { id: "render", label: "Render clips" },
 ];
 

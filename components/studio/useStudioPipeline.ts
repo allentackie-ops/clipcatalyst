@@ -30,13 +30,23 @@ import type {
 
 export type StudioSettings = HighlightOptions & RenderOptions;
 
+/** A finished clip plus the camera move it was rendered with — editor
+ *  re-renders replay the same track so the crop stays on the speaker. */
+export type StudioClip = FinishedClip & { track?: CropTrack };
+
 export type StudioState =
   | { status: "idle" }
   | { status: "running"; progress: PipelineProgress }
   | {
       status: "done";
-      clips: FinishedClip[];
+      clips: StudioClip[];
       sourceUrl: string;
+      /** Decoded audio duration — the editor's extension hard bound. */
+      sourceDuration: number;
+      /** Full transcript, absolute times, with diarized speaker labels. */
+      transcript: Transcript;
+      /** What the clips were rendered with — re-renders must match. */
+      renderOptions: RenderOptions;
       /** Planned clips that failed to render (0 normally). */
       failedCount: number;
     }
@@ -341,7 +351,7 @@ export function useStudioPipeline() {
         if (abortedRef.current) return;
 
         // Render each clip independently: one bad render shouldn't sink the batch.
-        const clips: FinishedClip[] = [];
+        const clips: StudioClip[] = [];
         let lastRenderError: unknown = null;
         for (let i = 0; i < plans.length; i++) {
           if (abortedRef.current) return;
@@ -366,7 +376,7 @@ export function useStudioPipeline() {
             );
             const url = URL.createObjectURL(result.blob);
             urlsRef.current.push(url);
-            clips.push({ ...plan, ...result, url });
+            clips.push({ ...plan, ...result, url, track: tracks[i] });
           } catch (e) {
             lastRenderError = e;
           }
@@ -381,6 +391,9 @@ export function useStudioPipeline() {
           status: "done",
           clips,
           sourceUrl,
+          sourceDuration: duration,
+          transcript,
+          renderOptions: { height: settings.height, watermark: settings.watermark },
           failedCount: plans.length - clips.length,
         });
       } catch (e) {

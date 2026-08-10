@@ -5,6 +5,7 @@
 import { cropCenterAt } from "./croptrack";
 import type { CropTrack } from "./croptrack";
 import { SPEAKER_COLORS } from "./diarize";
+import type { ZoomEvent } from "./edits";
 import type {
   ClipPlan,
   RenderOptions,
@@ -13,15 +14,34 @@ import type {
 } from "./types";
 
 /**
- * Render options plus the optional camera move.
+ * Resolved edits from `resolveEdits` (lib/studio/edits.ts). The caller passes
+ * an already-EDITED plan — start/end are the resolved bounds and the words are
+ * re-windowed to that start — so all existing plan-based math keeps working.
+ */
+export type RenderEdits = {
+  /** Absolute source-time segments to keep, sorted. keeps[0].from ==
+   *  plan.start and the last keep's `to` == plan.end. */
+  keeps: { from: number; to: number }[];
+  /** Zoom windows in seconds relative to plan.start (the caption clock). */
+  zooms: ZoomEvent[];
+  /** false → no caption strips; the watermark + progress bar stay. */
+  captions: boolean;
+  /** Σ keep durations — the output timeline the progress bar runs on. */
+  outputDuration: number;
+};
+
+/**
+ * Render options plus the optional camera move and edits.
  *
- * `RenderOptions` stays the frozen shared contract; the track is renderer-only
- * and optional, so existing callers keep compiling and keep their exact
- * behaviour (a centered crop).
+ * `RenderOptions` stays the frozen shared contract; the track and the edits
+ * are renderer-only and optional, so existing callers keep compiling and keep
+ * their exact behaviour (a centered crop, no cuts, captions on).
  */
 export type RenderClipOptions = RenderOptions & {
   /** Crop track from `buildCropTrack`. Absent → today's centered crop. */
   track?: CropTrack;
+  /** Edits to bake in. Absent → exactly today's behaviour, byte-identical. */
+  edits?: RenderEdits;
 };
 
 const MIME_PREFERENCES = [
@@ -55,6 +75,13 @@ const STOP_TIMEOUT_MS = 10_000;
 const AUDIO_RESUME_TIMEOUT_MS = 1_500;
 const FONTS_READY_TIMEOUT_MS = 2_000;
 const BACKGROUND_TICK_MS = 250;
+/** Seek across a cut — shorter than SEEK_TIMEOUT_MS; on timeout we carry on. */
+const SKIP_SEEK_TIMEOUT_MS = 2_000;
+/** How close (s) the playhead must get to a keep's end before skipping. */
+const SKIP_EPSILON_S = 0.03;
+/** Linear ease (s) at each zoom edge. edits.ts owns ZOOM_RAMP_S — mirrored
+ *  here because the edits.ts import must stay type-only. */
+const ZOOM_RAMP_S = 0.25;
 
 type CaptionWord = { text: string; start: number; end: number; speaker?: number };
 type CaptionGroup = { words: CaptionWord[]; start: number; end: number };
@@ -296,8 +323,18 @@ export async function renderClip(
     }
 
     const sourceDuration = Number.isFinite(video.duration) ? video.duration : plan.end;
-    const seekTarget = Math.min(Math.max(0, plan.start), Math.max(0, sourceDuration - 0.05));
-    const endTarget = Math.min(plan.end, sourceDuration > 0 ? sourceDuration : plan.end);
+    // With edits, record exactly the keeps' span: seek to the first keep's
+    // `from`, stop at the last keep's `to`. resolveEdits folds its bounds
+    // onto the keeps, so for a well-formed caller these equal plan.start and
+    // plan.end — this guards a mismatched plan from ever recording a
+    // supposedly-cut head or tail. Without edits both fall back to the plan
+    // verbatim, clamped exactly as before (the byte-identical path).
+    const editKeeps =
+      options.edits && options.edits.keeps.length > 0 ? options.edits.keeps : null;
+    const startAbs = editKeeps ? editKeeps[0].from : plan.start;
+    const endAbs = editKeeps ? editKeeps[editKeeps.length - 1].to : plan.end;
+    const seekTarget = Math.min(Math.max(0, startAbs), Math.max(0, sourceDuration - 0.05));
+    const endTarget = Math.min(endAbs, sourceDuration > 0 ? sourceDuration : endAbs);
 
     video.currentTime = seekTarget;
     await waitForEvent(video, "seeked", SEEK_TIMEOUT_MS);
@@ -391,6 +428,63 @@ export async function renderClip(
 
     const track = options.track;
 
+    // --- Edits: cuts, zooms, captions toggle. No `edits` → every branch
+    // below collapses to exactly today's behaviour. --------------------------
+    const edits = options.edits;
+    /** Keep segments (absolute source time); null → nothing to skip. Same
+     *  value the seek/end targets above were derived from — never diverges. */
+    const keeps = editKeeps;
+    /** Which keep the playhead is in — advanced by the skip logic below. */
+    let segIndex = 0;
+    // Output seconds accumulated before each keep. Progress runs on the OUTPUT
+    // clock when cuts exist, so the bar reaches exactly 1 at the end and never
+    // jumps backwards across a skip.
+    const keepStartsOut: number[] = [];
+    let outputTotal = 0;
+    if (keeps) {
+      for (const k of keeps) {
+        keepStartsOut.push(outputTotal);
+        outputTotal += k.to - k.from;
+      }
+      // resolveEdits guarantees ≥ 0.2 s; the floor only guards garbage input.
+      outputTotal = Math.max(outputTotal, 0.001);
+    }
+    const zooms = edits ? edits.zooms : [];
+    /** Captions can be toggled off per clip; watermark + progress bar stay. */
+    const captionsOn = !edits || edits.captions;
+
+    /**
+     * Progress fraction at clip time t. Without cuts this is exactly the old
+     * t / clipDuration. With cuts it converts to output time via the
+     * cumulative keep durations (accumulated locally rather than trusting the
+     * round3'd outputDuration, so the final frame lands on exactly 1).
+     */
+    const progressAt = (t: number): number => {
+      if (!keeps) return clamp01(t / clipDuration);
+      const i = segIndex < keeps.length ? segIndex : keeps.length - 1;
+      const seg = keeps[i];
+      const played = clamp(plan.start + t - seg.from, 0, seg.to - seg.from);
+      return clamp01((keepStartsOut[i] + played) / outputTotal);
+    };
+
+    /**
+     * Zoom factor at clip time t: 1 outside every event; inside one, a linear
+     * ramp from 1 to `scale` over ZOOM_RAMP_S at each edge. Events shorter
+     * than two ramps peak at their midpoint.
+     */
+    const zoomFactorAt = (t: number): number => {
+      if (zooms.length === 0) return 1; // unedited renders never reach the math
+      for (const z of zooms) {
+        if (z.start > t) break; // sorted — nothing later can contain t
+        if (t > z.end) continue;
+        const ramp = Math.min(ZOOM_RAMP_S, (z.end - z.start) / 2);
+        if (ramp <= 0) return z.scale;
+        const edge = Math.min(t - z.start, z.end - t);
+        return 1 + (z.scale - 1) * clamp01(edge / ramp);
+      }
+      return 1;
+    };
+
     const drawVideoFrame = (t: number) => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -399,6 +493,18 @@ export async function renderClip(
         const scale = Math.max(width / vw, height / vh);
         const sw = width / scale;
         const sh = height / scale;
+        const z = zoomFactorAt(t);
+        if (z !== 1) {
+          // Punch-in: shrink the source window by z toward the same horizontal
+          // center the crop uses, so the zoom pushes toward the subject.
+          const sw2 = sw / z;
+          const sh2 = sh / z;
+          const cx = track ? cropCenterAt(track, t) : 0.5;
+          const sx = clamp(cx * vw - sw2 / 2, 0, Math.max(0, vw - sw2));
+          const sy = (vh - sh2) / 2;
+          ctx.drawImage(video, sx, sy, sw2, sh2, 0, 0, width, height);
+          return;
+        }
         // Horizontal: follow the crop track when there is one, else centered.
         // The track's cx is the subject center as a fraction of source width.
         const sx = track
@@ -468,7 +574,7 @@ export async function renderClip(
     };
 
     const drawOverlays = (t: number) => {
-      drawCaptions(t);
+      if (captionsOn) drawCaptions(t);
 
       if (options.watermark) {
         const margin = Math.round(height * 0.02);
@@ -480,7 +586,7 @@ export async function renderClip(
       }
 
       ctx.fillStyle = BRAND_VIOLET;
-      ctx.fillRect(0, height - PROGRESS_BAR_PX, width * clamp01(t / clipDuration), PROGRESS_BAR_PX);
+      ctx.fillRect(0, height - PROGRESS_BAR_PX, width * progressAt(t), PROGRESS_BAR_PX);
     };
 
     // Let webfonts finish loading before the first recorded frame, raced with
@@ -506,9 +612,11 @@ export async function renderClip(
 
     const playbackLoop = new Promise<void>((resolve, reject) => {
       let finished = false;
+      // Cuts add a seek each — the budget covers the SOURCE span plus one
+      // seek allowance per keep segment.
       const watchdog = setTimeout(() => {
         finish(new Error("Rendering timed out — the video stopped playing back."));
-      }, clipDuration * 3000 + 30_000);
+      }, clipDuration * 3000 + 30_000 + (keeps ? keeps.length * 2000 : 0));
       const reachedEnd = () => video.currentTime >= endTarget || video.ended;
       const drawNow = () => {
         const t = video.currentTime - plan.start;
@@ -518,7 +626,7 @@ export async function renderClip(
         } catch {
           // Stalled decoder — keep the last painted frame and carry on.
         }
-        onProgress?.(clamp01(t / clipDuration));
+        onProgress?.(progressAt(t));
       };
       const finish = (err?: Error) => {
         if (finished || stopRequested) return;
@@ -533,11 +641,58 @@ export async function renderClip(
         if (err) reject(err);
         else resolve();
       };
+      // Cuts: when the playhead reaches the end of the current keep and a
+      // later one exists, pause the recorder, seek over the cut, and resume.
+      // `skipping` is the re-entry guard — the rAF loop, 'timeupdate' and the
+      // background interval all funnel through maybeSkip, and any of them can
+      // fire while the seek is still in flight.
+      let skipping = false;
+      const skipCut = async (target: number) => {
+        try {
+          // Pause the recorder over the seek so the cut isn't captured. If it
+          // won't pause, keep going — a one-frame glitch beats a dead render.
+          const rec = recorder;
+          try {
+            if (rec && rec.state === "recording") rec.pause();
+          } catch {
+            /* degrade: record through the seek */
+          }
+          try {
+            video.pause();
+          } catch {
+            /* ignore */
+          }
+          video.currentTime = target;
+          // On timeout just continue — the watchdog owns truly dead playback.
+          await waitForEvent(video, "seeked", SKIP_SEEK_TIMEOUT_MS);
+          segIndex++;
+          try {
+            if (rec && rec.state === "paused") rec.resume();
+          } catch {
+            /* ignore — recorder.onerror fails the render if it truly died */
+          }
+          if (!finished && !stopRequested) {
+            video.play().catch(() => undefined);
+          }
+        } catch {
+          /* a failed skip must never kill the loop — the next tick retries */
+        } finally {
+          skipping = false;
+        }
+      };
+      const maybeSkip = () => {
+        if (!keeps || skipping || finished || stopRequested) return;
+        if (segIndex + 1 >= keeps.length) return;
+        if (video.currentTime < keeps[segIndex].to - SKIP_EPSILON_S) return;
+        skipping = true;
+        void skipCut(keeps[segIndex + 1].from);
+      };
       // rAF freezes in hidden tabs while the video + recorder keep running, so
       // the stop condition can't live in the rAF loop alone. Media events keep
       // firing when hidden — end the clip from 'timeupdate' too.
       const onTimeUpdate = () => {
         if (finished || stopRequested) return;
+        maybeSkip();
         if (reachedEnd()) {
           drawNow();
           finish();
@@ -548,6 +703,7 @@ export async function renderClip(
       // frames and checking the stop condition (cleared in finish + cleanup).
       tickIntervalId = setInterval(() => {
         if (finished || stopRequested) return;
+        maybeSkip();
         drawNow();
         if (reachedEnd()) finish();
       }, BACKGROUND_TICK_MS);
@@ -556,6 +712,7 @@ export async function renderClip(
       );
       const tick = () => {
         if (finished) return;
+        maybeSkip();
         drawNow();
         if (reachedEnd()) {
           finish();

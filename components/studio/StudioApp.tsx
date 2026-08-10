@@ -12,6 +12,7 @@ import { useStudioPipeline } from "./useStudioPipeline";
 import StudioDropzone from "./StudioDropzone";
 import StageChecklist from "./StageChecklist";
 import ClipCard from "./ClipCard";
+import ResultsView from "./ResultsView";
 import {
   DEFAULT_SETTINGS,
   formatBytes,
@@ -778,50 +779,15 @@ export default function StudioApp() {
             </div>
           ) : state.status === "done" ? (
             <div className="animate-rise">
-              <div className="mx-auto flex max-w-4xl flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:justify-between sm:text-left">
-                <div>
-                  <p className="mb-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-signal-400">
-                    Done — on your device
-                  </p>
-                  <h1
-                    tabIndex={-1}
-                    className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl"
-                  >
-                    Your clips are ready
-                  </h1>
-                  <p className="mt-3 text-sm text-zinc-400 sm:text-base">
-                    <span className="font-mono">{state.clips.length}</span>{" "}
-                    {state.clips.length === 1 ? "clip" : "clips"}, scored and
-                    captioned. Preview, then download.
-                  </p>
-                </div>
-                <Button variant="secondary" onClick={handleReset}>
-                  Clip another video
-                </Button>
-              </div>
-
-              {state.failedCount > 0 ? (
-                <p className="mx-auto mt-8 max-w-4xl rounded-xl border border-ember-500/30 bg-ember-500/[0.06] px-4 py-3 text-center text-sm text-ember-300">
-                  <span className="font-mono">{state.failedCount}</span>{" "}
-                  {state.failedCount === 1 ? "clip" : "clips"} didn&apos;t
-                  finish rendering — here&apos;s what did.
-                </p>
-              ) : null}
-
-              <div
-                className={`mx-auto mt-10 grid max-w-4xl gap-6 ${
-                  state.clips.length > 1 ? "md:grid-cols-2" : "md:max-w-md"
-                } ${state.clips.length > 2 ? "xl:max-w-6xl xl:grid-cols-3" : ""}`}
-              >
-                {state.clips.map((clip, i) => (
-                  <ClipCard key={clip.id} clip={clip} index={i} />
-                ))}
-              </div>
-
-              <p className="mt-10 text-center font-mono text-xs text-zinc-500">
-                Exports include the beta watermark · MP4 vs WebM depends on your
-                browser
-              </p>
+              <ResultsView
+                clips={state.clips}
+                sourceUrl={state.sourceUrl}
+                sourceDuration={state.sourceDuration}
+                transcript={state.transcript}
+                renderOptions={state.renderOptions}
+                failedCount={state.failedCount}
+                onReset={handleReset}
+              />
             </div>
           ) : (
             <div className="animate-rise">

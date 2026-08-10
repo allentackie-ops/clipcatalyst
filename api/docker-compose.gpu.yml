@@ -1,0 +1,19 @@
+# GPU override — use alongside the base compose file on a CUDA host:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Cleaner than editing the base file: nothing to uncomment, and the CPU path
+# stays the default. Requires nvidia-container-toolkit on the host.
+
+services:
+  worker:
+    environment:
+      CC_WHISPER_MODEL: ${CC_WHISPER_MODEL:-distil-large-v3}
+      CC_WHISPER_DEVICE: cuda
+      CC_WHISPER_COMPUTE: ${CC_WHISPER_COMPUTE:-float16}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

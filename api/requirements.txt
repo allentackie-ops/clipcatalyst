@@ -1,0 +1,13 @@
+# ClipCatalyst Cloud API — shared deps (API container).
+fastapi
+uvicorn[standard]
+celery
+redis
+pydantic
+python-multipart
+imageio-ffmpeg
+# boto3 lives here (not worker-only) because BOTH roles need it in S3 mode
+# (CC_STORAGE=s3): the api mints presigned PUT/GET URLs, the worker uploads
+# clips + stages the source. One image, so one place to declare it. Pulls in
+# botocore, which storage.py imports lazily — unused when CC_STORAGE=local.
+boto3

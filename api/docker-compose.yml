@@ -1,0 +1,120 @@
+# ClipCatalyst Cloud — single-box stack: api + worker (same image) + redis.
+# Run from api/:  docker compose up --build
+# Override any CC_* var via a .env file next to this compose file or the shell.
+# Copy .env.example → .env and fill it in before exposing this publicly.
+
+x-app-env: &app-env
+  CC_DATA_DIR: /data
+  CC_REDIS_URL: redis://redis:6379/0
+  CC_QUEUE: redis
+  CC_STORAGE: ${CC_STORAGE:-local}
+  CC_TRANSCRIBER: ${CC_TRANSCRIBER:-faster-whisper}
+  # CPU-friendly default; production GPU: distil-large-v3 / cuda / float16 (see DEPLOY.md).
+  CC_WHISPER_MODEL: ${CC_WHISPER_MODEL:-base}
+  CC_WHISPER_DEVICE: ${CC_WHISPER_DEVICE:-auto}
+  CC_WHISPER_COMPUTE: ${CC_WHISPER_COMPUTE:-default}
+  CC_CORS_ORIGINS: ${CC_CORS_ORIGINS:-https://allentackie-ops.github.io,http://localhost:3000,http://localhost:3100}
+  CC_PUBLIC_BASE_URL: ${CC_PUBLIC_BASE_URL:-}
+  CC_MAX_UPLOAD_BYTES: ${CC_MAX_UPLOAD_BYTES:-2000000000}
+  # Auth + retention (see .env.example). Token "" = OPEN (dev only); set one
+  # before exposing publicly. TTL reaps sources/clips/rows older than N hours.
+  CC_API_TOKEN: ${CC_API_TOKEN:-}
+  CC_JOB_TTL_HOURS: ${CC_JOB_TTL_HOURS:-48}
+  # S3 mode (CC_STORAGE=s3). Safe empty/defaults when unused. AWS credentials
+  # are NOT set here — boto3 reads them from the standard chain (instance role,
+  # or the AWS_* keys in the optional .env loaded via env_file below). Injecting
+  # an empty AWS_ACCESS_KEY_ID would break instance-role auth, so we never do.
+  CC_S3_BUCKET: ${CC_S3_BUCKET:-}
+  CC_S3_PREFIX: ${CC_S3_PREFIX:-clipcatalyst}
+  CC_S3_REGION: ${CC_S3_REGION:-us-east-1}
+  # Whisper model cache lives on the data volume — survives container rebuilds.
+  HF_HOME: /data/hf-cache
+
+services:
+  api:
+    build: .
+    image: clipcatalyst-api
+    ports:
+      - "8000:8000"
+    environment: *app-env
+    # Optional: pulls AWS_* (and any other literal vars) from .env into the
+    # container for S3 mode. required:false keeps `docker compose up` working
+    # with no .env for the local-storage default. `environment` above still
+    # wins over anything here for the CC_* keys.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ccdata:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/v1/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: clipcatalyst-api
+    # queue_app lists worker.py in its Celery include=[...], so this -A target
+    # registers process_job + reap_expired. One GPU / one model → concurrency 1.
+    command: celery -A clipcatalyst_api.queue_app worker --loglevel=info --concurrency=1
+    environment: *app-env
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ccdata:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy  # api's startup creates dirs + tables
+    healthcheck:
+      # Ask this very worker node to answer over the broker. CMD-SHELL so the
+      # container shell expands $HOSTNAME into the celery@<host> nodename; the
+      # $$ escapes compose interpolation so the shell (not compose) sees it.
+      test:
+        - CMD-SHELL
+        - "celery -A clipcatalyst_api.queue_app inspect ping -d celery@$$HOSTNAME --timeout 10"
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+    # --- GPU transcription (production) --------------------------------------
+    # Requires nvidia-container-toolkit on the host (see DEPLOY.md §2).
+    # Uncomment to hand the worker one NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  redis:
+    image: redis:7-alpine
+    # appendonly persistence so queued jobs survive a redis restart; the AOF
+    # lives on the redisdata volume.
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  ccdata:
+  redisdata:

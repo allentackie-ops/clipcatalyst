@@ -14,6 +14,27 @@ export const CLOUD_API = (process.env.NEXT_PUBLIC_CLOUD_API ?? "").replace(
 /** True when a cloud API base is configured at build time. */
 export const cloudEnabled = CLOUD_API !== "";
 
+// ---- Session auth hook -----------------------------------------------------
+// lib/account.ts registers its token reader here at module load, so cloud
+// calls carry the signed-in user's bearer (the server enforces quota/height/
+// watermark per plan, and user-owned jobs 404 without it) while cloud.ts
+// stays ignorant of where tokens live. Never registered → () => null →
+// anonymous requests, exactly today's behaviour.
+
+type TokenSource = () => string | null;
+
+let tokenSource: TokenSource = () => null;
+
+/** Register where cloud calls read the session token (see lib/account.ts). */
+export function setCloudTokenSource(source: TokenSource): void {
+  tokenSource = source;
+}
+
+function authHeaders(): Record<string, string> {
+  const token = tokenSource();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export type JobStatus =
   | "awaiting_upload"
   | "queued"
@@ -116,7 +137,7 @@ export function createJob(
 ): Promise<CreateJobResponse> {
   return requestJson<CreateJobResponse>(`${base}/v1/jobs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(req),
   });
 }
@@ -145,7 +166,15 @@ export function uploadSource(
     const settle = () => signal?.removeEventListener("abort", onAbort);
     signal?.addEventListener("abort", onAbort, { once: true });
 
-    xhr.open("PUT", resolveUrl(base, opts?.uploadUrl ?? `/v1/uploads/${jobId}`));
+    const uploadUrl = opts?.uploadUrl ?? `/v1/uploads/${jobId}`;
+    xhr.open("PUT", resolveUrl(base, uploadUrl));
+    // Only the API's own (relative) upload path takes the session bearer —
+    // a presigned S3 url carries its auth in the query string, and adding an
+    // Authorization header on top makes S3 reject the request.
+    if (!/^https?:\/\//.test(uploadUrl)) {
+      const token = tokenSource();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
     };
@@ -179,7 +208,7 @@ export function startJob(
 ): Promise<{ job_id: string; status: JobStatus }> {
   return requestJson<{ job_id: string; status: JobStatus }>(
     `${base}/v1/jobs/${jobId}/start`,
-    { method: "POST" }
+    { method: "POST", headers: authHeaders() }
   );
 }
 
@@ -220,6 +249,7 @@ export async function pollJob(
   for (;;) {
     try {
       const job = await requestJson<CloudJob>(`${base}/v1/jobs/${jobId}`, {
+        headers: authHeaders(),
         signal,
       });
       failures = 0;
@@ -241,29 +271,68 @@ export async function pollJob(
 export type CloudFinishedClip = FinishedClip & { speakerCount?: number };
 
 /**
- * Map server clips into the FinishedClip shape ClipCard renders: absolute
- * url, mp4 container, duration via end - start. The server never reports
- * file size, so `blob` is a size-only stand-in — ClipCard reads nothing but
+ * Map server clips into the FinishedClip shape ClipCard renders: mp4
+ * container, duration via end - start.
+ *
+ * Anonymous: absolute url straight at the server; it never reports file
+ * size, so `blob` is a size-only stand-in — ClipCard reads nothing but
  * `blob.size`, and formatBytes(NaN) renders "—".
+ *
+ * Signed in: `/v1/files/*` of a user-owned job 404s without the session
+ * bearer, and <video src> can't send headers — so each file is fetched with
+ * the token into a real Blob and served from an object URL (which also gives
+ * ClipCard a real size). The caller owns the returned objectUrls and must
+ * revoke them when the clips are dropped. A failed fetch falls back to the
+ * raw url so one bad download can't sink the batch (founder-token/dev-open
+ * servers still play it anonymously).
  */
-export function toFinishedClips(
+export async function toFinishedClips(
   base: string,
-  clips: CloudClip[]
-): CloudFinishedClip[] {
-  return clips.map((clip) => ({
-    id: clip.id,
-    start: clip.start,
-    end: clip.end,
-    score: clip.score,
-    title: clip.title,
-    hooks: clip.hooks,
-    reason: clip.reason,
-    tip: clip.tip,
-    words: [],
-    url: resolveUrl(base, clip.url),
-    mimeType: "video/mp4",
-    extension: "mp4",
-    blob: { size: Number.NaN } as unknown as Blob,
-    speakerCount: clip.speaker_count,
-  }));
+  clips: CloudClip[],
+  signal?: AbortSignal
+): Promise<{ clips: CloudFinishedClip[]; objectUrls: string[] }> {
+  const token = tokenSource();
+  const objectUrls: string[] = [];
+  const out: CloudFinishedClip[] = [];
+  for (const clip of clips) {
+    const rawUrl = resolveUrl(base, clip.url);
+    let url = rawUrl;
+    let blob: Blob = { size: Number.NaN } as unknown as Blob;
+    if (token) {
+      try {
+        const res = await fetch(rawUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal,
+        });
+        if (res.ok) {
+          blob = await res.blob();
+          url = URL.createObjectURL(blob);
+          objectUrls.push(url);
+        }
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          for (const u of objectUrls) URL.revokeObjectURL(u);
+          throw e;
+        }
+        // Network blip — keep the raw url fallback.
+      }
+    }
+    out.push({
+      id: clip.id,
+      start: clip.start,
+      end: clip.end,
+      score: clip.score,
+      title: clip.title,
+      hooks: clip.hooks,
+      reason: clip.reason,
+      tip: clip.tip,
+      words: [],
+      url,
+      mimeType: "video/mp4",
+      extension: "mp4",
+      blob,
+      speakerCount: clip.speaker_count,
+    });
+  }
+  return { clips: out, objectUrls };
 }

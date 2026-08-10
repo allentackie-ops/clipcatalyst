@@ -52,6 +52,16 @@ class Settings:
     render_timeout_s: int = 900  # hard ceiling on a single ffmpeg render
     face_tracking: str = "on"  # "on" | "off" — reframe on the speaker
     diarization: str = "on"  # "on" | "off" — color captions per speaker
+    session_ttl_days: int = 30  # account sessions expire this many days out
+    mailer: str = "none"  # "none" | "console" | "resend" — account email
+    resend_api_key: str = ""  # only for CC_MAILER=resend
+    billing: str = "off"  # "stripe" | "fake" | "off" — plan upgrades
+    stripe_secret_key: str = ""  # sk_… (never logged)
+    stripe_webhook_secret: str = ""  # whsec_… — webhook signature verification
+    stripe_price_starter: str = ""  # price_… ids mapping Stripe prices → plans
+    stripe_price_pro: str = ""
+    stripe_price_enterprise: str = ""
+    frontend_origin: str = "http://localhost:3000"  # checkout/portal return URLs
 
     @property
     def uploads_dir(self) -> Path:
@@ -104,4 +114,16 @@ def get_settings() -> Settings:
         render_timeout_s=int(os.environ.get("CC_RENDER_TIMEOUT_S", "900")),
         face_tracking=os.environ.get("CC_FACE_TRACKING", "on"),
         diarization=os.environ.get("CC_DIARIZATION", "on"),
+        session_ttl_days=int(os.environ.get("CC_SESSION_TTL_DAYS", "30")),
+        mailer=os.environ.get("CC_MAILER", "none"),
+        resend_api_key=os.environ.get("CC_RESEND_API_KEY", ""),
+        billing=os.environ.get("CC_BILLING", "off"),
+        stripe_secret_key=os.environ.get("CC_STRIPE_SECRET_KEY", ""),
+        stripe_webhook_secret=os.environ.get("CC_STRIPE_WEBHOOK_SECRET", ""),
+        stripe_price_starter=os.environ.get("CC_STRIPE_PRICE_STARTER", ""),
+        stripe_price_pro=os.environ.get("CC_STRIPE_PRICE_PRO", ""),
+        stripe_price_enterprise=os.environ.get("CC_STRIPE_PRICE_ENTERPRISE", ""),
+        frontend_origin=os.environ.get(
+            "CC_FRONTEND_ORIGIN", "http://localhost:3000"
+        ).rstrip("/"),
     )

@@ -33,6 +33,7 @@ from .pipeline.types import (
     RenderOptions,
     Transcript,
 )
+from .plans import PLANS, effective_plan
 from .queue_app import celery_app
 from .settings import Settings, get_settings
 from .storage import Storage, get_storage
@@ -271,7 +272,7 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
     )
 
     # --- render (sequential, per-clip failure isolation) -----------------
-    opts = RenderOptions(height=int(job["height"]))
+    opts = RenderOptions(height=int(job["height"]), watermark=_watermark_for(job))
     clips: list[dict] = []
     failed_count = 0
 
@@ -326,6 +327,16 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail=done_detail,
         error=None,
     )
+    # Quota bookkeeping: bill the owner for the clips ACTUALLY rendered (a
+    # failed clip costs nothing), against the UTC month of completion. This is
+    # the same table /v1/me and the start-time quota check read, so the account
+    # page can never disagree with enforcement. Anonymous jobs bill no one.
+    if job["user_id"]:
+        db.add_usage(
+            str(job["user_id"]),
+            datetime.now(timezone.utc).strftime("%Y-%m"),
+            len(clips),
+        )
 
 
 def _diarize_transcript(
@@ -359,6 +370,24 @@ def _diarize_transcript(
             exc_info=True,
         )
         return transcript, 1
+
+
+def _watermark_for(job: dict) -> bool:
+    """Whether this job's renders carry the watermark. Server-side facts only.
+
+    Anonymous founder/dev jobs keep the cloud default — watermarked, exactly
+    today's output. Owned jobs follow the owner's EFFECTIVE plan as of render
+    time (free and lapsed-paid plans require it; live paid plans drop it), so
+    an upgrade that lands between create and start is honoured and a canceled
+    plan can't keep exporting clean clips. Nothing the client sent is read.
+    """
+    owner_id = str(job.get("user_id") or "")
+    if not owner_id:
+        return True
+    user = db.get_user_by_id(owner_id)
+    if user is None:
+        return True
+    return PLANS[effective_plan(user)].watermark_required
 
 
 def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> dict:

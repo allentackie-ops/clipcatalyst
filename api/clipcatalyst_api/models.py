@@ -12,7 +12,9 @@ class CreateJobRequest(BaseModel):
     size_bytes: int = Field(ge=0)
     target_length: Literal[15, 30, 60] = 30
     count: int = Field(default=2, ge=1, le=3)
-    height: Literal[960, 1280, 1920] = 1920
+    # 3840 (4K) is cloud-only — the browser pipeline stays ≤ 1920. A session's
+    # request is clamped server-side to its plan's max_height (see create_job).
+    height: Literal[960, 1280, 1920, 3840] = 1920
 
 
 class UploadTargetOut(BaseModel):
@@ -23,6 +25,10 @@ class UploadTargetOut(BaseModel):
 class CreateJobResponse(BaseModel):
     job_id: str
     upload: UploadTargetOut
+    # What the server DECIDED (post-entitlement), not what was asked: the
+    # height after the plan clamp and whether renders will carry a watermark.
+    height: int
+    watermark: bool
 
 
 class UploadAckResponse(BaseModel):
@@ -71,3 +77,72 @@ class HealthzResponse(BaseModel):
     queue: str  # "redis" | "eager"
     storage: str  # "local" | "s3"
     transcriber: str  # "faster-whisper" | "fake"
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    # MIN_PASSWORD_LENGTH (auth.py) — enforced here so the 422 names the field.
+    password: str = Field(min_length=8, max_length=1024)
+
+
+class LoginRequest(BaseModel):
+    # No min_length beyond non-empty: every credential failure must collapse
+    # into the one generic 401, so login never pre-judges password shape.
+    email: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class AuthUserOut(BaseModel):
+    id: str
+    email: str
+    plan: str
+    plan_status: str
+
+
+class AuthResponse(BaseModel):
+    token: str  # raw `cc_sess_…` bearer — shown once, only its hash is stored
+    user: AuthUserOut
+
+
+class LogoutResponse(BaseModel):
+    ok: bool = True
+
+
+class QuotaOut(BaseModel):
+    limit: int | None  # None = unlimited (enterprise)
+    used: int
+    month: str  # "YYYY-MM" (UTC)
+
+
+class EntitlementsOut(BaseModel):
+    max_height: int
+    watermark_required: bool
+    clips_per_month: int | None
+
+
+class MeResponse(BaseModel):
+    """The single account source the frontend trusts (plan, quota, limits)."""
+
+    email: str
+    plan: str
+    plan_status: str
+    quota: QuotaOut
+    entitlements: EntitlementsOut
+
+
+class CheckoutRequest(BaseModel):
+    # A plan NAME, validated in the route (unknown/free → 400, not 422) and
+    # mapped to a server-configured price id — clients never send price ids.
+    plan: str = Field(min_length=1, max_length=32)
+
+
+class CheckoutResponse(BaseModel):
+    url: str  # Stripe Checkout URL to redirect the browser to
+
+
+class PortalResponse(BaseModel):
+    url: str  # Stripe billing portal URL
+
+
+class WebhookAckResponse(BaseModel):
+    received: bool = True

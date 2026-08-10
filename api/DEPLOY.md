@@ -118,7 +118,34 @@ function is just `probe → transcribe → plan_clips → render_clip` wrapped i
 their decorator, with the Celery queue swapped for their invocation API. Keep
 this compose stack for the API and job store; only the worker moves.
 
-## 6. Security — do this before you expose the box publicly
+## 6. Accounts + billing (Stripe)
+
+Email+password accounts are always on. Paid plans need Stripe, which is **off
+by default** (`CC_BILLING=off`): checkout and portal answer an honest 503 and
+every account is free-tier. To turn subscriptions on, follow the step-by-step
+founder walkthrough in **[STRIPE-SETUP.md](STRIPE-SETUP.md)** — create the
+three products, the webhook endpoint, then set:
+
+```
+CC_BILLING=stripe
+CC_STRIPE_SECRET_KEY=sk_live_...
+CC_STRIPE_WEBHOOK_SECRET=whsec_...
+CC_STRIPE_PRICE_STARTER=price_...
+CC_STRIPE_PRICE_PRO=price_...
+CC_STRIPE_PRICE_ENTERPRISE=price_...
+CC_FRONTEND_ORIGIN=https://allentackie-ops.github.io/clipcatalyst
+```
+
+Plans change **only** through webhook events whose `Stripe-Signature` verifies
+against `CC_STRIPE_WEBHOOK_SECRET` — nothing a client sends can raise its own
+plan, height cap, or quota. Entitlements are enforced server-side: session job
+heights clamp to the plan's `max_height`, free-tier renders keep the
+watermark, and `POST /v1/jobs/{id}/start` answers 402 once the plan's monthly
+clip quota is spent. `CC_BILLING=fake` is the offline dev gateway (tests, and
+driving the account UI without a Stripe account) — webhooks are
+signature-verified in fake mode too.
+
+## 7. Security — do this before you expose the box publicly
 
 The default build is **open**: with `CC_API_TOKEN` unset, anyone who can reach
 `:8000` can create jobs, upload 2 GB files, and download clips. That default
@@ -126,7 +153,7 @@ exists so `docker compose up` just works on localhost. **It is dev-only.** The
 moment the API is reachable from the internet, treat the steps below as
 mandatory, not optional.
 
-### 6.1 Set an API token
+### 7.1 Set an API token
 
 Generate a strong token and put it in the `.env` next to the compose file:
 
@@ -144,7 +171,7 @@ When set, the mutating routes — `POST /v1/jobs`, `PUT /v1/uploads/{id}`,
 and `GET /v1/healthz` stay open so status polling and health checks keep
 working. Copy `.env.example → .env` for the full, documented variable list.
 
-### 6.2 Put TLS + rate limiting in front
+### 7.2 Put TLS + rate limiting in front
 
 Never expose plain `http://your-box:8000`. GitHub Pages is HTTPS, so browsers
 block mixed-content calls anyway (see §3). Terminate TLS and rate-limit at a
@@ -169,7 +196,7 @@ Then set `CC_PUBLIC_BASE_URL=https://your-box.example.com` so clip URLs come
 back absolute. Rate limiting matters because uploads and renders are expensive —
 one script hammering `POST /v1/jobs` can fill your disk or GPU queue.
 
-### 6.3 Retention
+### 7.3 Retention
 
 `CC_JOB_TTL_HOURS` (default 48) bounds how long uploaded sources, rendered
 clips, and job rows live before the hourly reaper deletes them. It is a storage
@@ -177,7 +204,7 @@ and privacy control as much as a cleanup one: user videos should not sit on the
 box forever. Lower it if you handle sensitive footage; raise it if users need
 longer to fetch their clips.
 
-### 6.4 How the frontend sends the token — and the honest caveat
+### 7.4 How the frontend sends the token — and the honest caveat
 
 The static frontend bakes both the API URL and the token in at build time:
 

@@ -26,7 +26,9 @@ export default function Navbar() {
         <Link href="/" aria-label="ClipCatalyst home">
           <Logo />
         </Link>
-        <nav className="hidden items-center gap-7 md:flex" aria-label="Main">
+        {/* Seven links + the CTA no longer fit at md — the inline bar starts
+            at lg, and md falls back to the same menu the phone gets. */}
+        <nav className="hidden items-center gap-7 lg:flex" aria-label="Main">
           {links.map((l) => (
             <Link
               key={l.href}
@@ -45,7 +47,7 @@ export default function Navbar() {
             aria-expanded={open}
             aria-controls="mobile-menu"
             onClick={() => setOpen((o) => !o)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-300 transition-colors hover:text-white md:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-300 transition-colors hover:text-white lg:hidden"
           >
             <svg
               width="20"
@@ -70,7 +72,7 @@ export default function Navbar() {
         <nav
           id="mobile-menu"
           aria-label="Main"
-          className="absolute inset-x-0 top-16 border-b border-line bg-ink-950/95 backdrop-blur-xl md:hidden"
+          className="absolute inset-x-0 top-16 border-b border-line bg-ink-950/95 backdrop-blur-xl lg:hidden"
         >
           <Container>
             {links.map((l) => (

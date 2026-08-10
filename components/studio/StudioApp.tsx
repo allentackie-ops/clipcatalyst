@@ -2,8 +2,9 @@
 
 // ClipCatalyst Studio — the real in-browser clipping pipeline.
 // All pipeline state comes from useStudioPipeline; this component owns the
-// file pick + settings (lifted so they survive reset) and the five views:
-// idle / running / done / error / unsupported-browser.
+// file pick + settings (lifted so they survive reset) and the six views:
+// idle / running / done / error / unsupported-browser / phone-or-tablet.
+// Which one is reachable at all is decided up front by ./capabilities.ts.
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,6 +34,12 @@ import {
   type CloudFinishedClip,
   type CloudStage,
 } from "./cloud";
+import {
+  ASSUME_READY,
+  classifyPlatform,
+  readBrowserCapabilities,
+  type CapabilityVerdict,
+} from "./capabilities";
 
 // ---- Cloud beta (only reachable when NEXT_PUBLIC_CLOUD_API is set) ----
 
@@ -109,6 +116,12 @@ function TopBar() {
   );
 }
 
+/**
+ * Desktop browser missing one of the five pipeline APIs. Phones never land
+ * here — "this browser is missing recording APIs" is a true sentence and the
+ * wrong answer on a phone, where the real reason is the device (see
+ * MobileUnsupportedView).
+ */
 function UnsupportedView() {
   return (
     <div className="mx-auto w-full max-w-xl text-center">
@@ -155,16 +168,100 @@ function UnsupportedView() {
   );
 }
 
+/**
+ * Phone or tablet with no cloud engine configured. Shown BEFORE any file is
+ * picked, because the on-device run cannot succeed here and finding that out
+ * after the upload — via a decode error that blames the video — is what this
+ * whole change exists to stop.
+ *
+ * The reason given is the true one for the device: on iOS every browser is
+ * WebKit, which will not hand a video file's audio to the page; elsewhere the
+ * pipeline simply needs more memory than a phone tab is given. It never says
+ * "your browser is missing recording APIs".
+ */
+function MobileUnsupportedView({ verdict }: { verdict: CapabilityVerdict }) {
+  return (
+    <div className="mx-auto w-full max-w-xl text-center">
+      <Card className="p-8 sm:p-12">
+        <span
+          className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-line-strong bg-ink-800"
+          aria-hidden
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-brand-400"
+          >
+            <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+            <path d="M11 18.5h2" />
+          </svg>
+        </span>
+        <h1
+          tabIndex={-1}
+          className="mt-6 font-display text-2xl font-semibold tracking-tight text-white outline-none sm:text-3xl"
+        >
+          Clipping runs on a desktop, not a phone
+        </h1>
+        <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
+          {verdict.isIos ? (
+            <>
+              Studio does the whole job inside this tab — Whisper
+              transcription, moment scoring, and video rendering. On iPhone and
+              iPad every browser runs on Apple&apos;s WebKit engine, which
+              won&apos;t hand a video file&apos;s audio track to the page, and
+              the render step needs more memory than iOS gives a tab.
+            </>
+          ) : (
+            <>
+              Studio does the whole job inside this tab — Whisper
+              transcription, moment scoring, and video rendering. That is more
+              memory and CPU than a phone browser will give one tab, so a run
+              started here would stall or die partway through.
+            </>
+          )}
+        </p>
+        <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-400">
+          Nothing is wrong with your video. Open this page in Chrome, Edge, or
+          Firefox on a computer and it runs end to end. Cloud clipping — upload
+          once, get clips back on any device — is what the waitlist unlocks.
+        </p>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Button href="/demo">Watch the product tour</Button>
+          <Button href="/#waitlist" variant="secondary">
+            Join the waitlist
+          </Button>
+          <Button href="/" variant="ghost">
+            Back home
+          </Button>
+        </div>
+        <p className="mt-8 font-mono text-xs text-zinc-600">
+          Detected: {verdict.device} · {verdict.engine} engine
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 function ErrorView({
   message,
   canRetry,
   onRetry,
   onPickAnother,
+  showMobileHelp = false,
 }: {
   message: string;
   canRetry: boolean;
   onRetry: () => void;
   onPickAnother: () => void;
+  /** On a phone, "try again" is often not a real option — offer somewhere to
+   *  go instead of a retry loop. */
+  showMobileHelp?: boolean;
 }) {
   return (
     <div className="mx-auto w-full max-w-xl text-center">
@@ -203,6 +300,19 @@ function ErrorView({
             Pick another video
           </Button>
         </div>
+        {showMobileHelp ? (
+          <p className="mt-6 text-xs leading-relaxed text-zinc-500">
+            On a phone, the on-device engine can&apos;t finish this.{" "}
+            <Link href="/demo" className="text-brand-300 underline-offset-4 hover:underline">
+              Watch the product tour
+            </Link>{" "}
+            or{" "}
+            <Link href="/#waitlist" className="text-brand-300 underline-offset-4 hover:underline">
+              join the waitlist
+            </Link>{" "}
+            for cloud clipping — or open Studio on a desktop.
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -211,12 +321,16 @@ function ErrorView({
 function EngineToggle({
   engine,
   onChange,
+  mobile,
 }: {
   engine: Engine;
   onChange: (engine: Engine) => void;
+  /** On a phone/tablet the on-device chip stays selectable but is labelled
+   *  for what it is: the desktop engine. Cloud is preselected. */
+  mobile: boolean;
 }) {
   const chips: { id: Engine; label: string }[] = [
-    { id: "device", label: "On-device" },
+    { id: "device", label: mobile ? "On-device (desktop)" : "On-device" },
     { id: "cloud", label: "Cloud beta" },
   ];
   return (
@@ -251,6 +365,12 @@ function EngineToggle({
           <>
             Cloud uploads your video to your ClipCatalyst server — minutes-long
             jobs finish in <span className="font-mono">~2 min</span>.
+          </>
+        ) : mobile ? (
+          <>
+            On-device runs the whole pipeline in this tab — it needs Chrome,
+            Edge, or Firefox on a desktop. On a phone it usually stops while
+            reading the video&apos;s audio.
           </>
         ) : (
           <>Everything runs in this browser — no upload, no queue.</>
@@ -458,8 +578,11 @@ export default function StudioApp() {
   const [fileDuration, setFileDuration] = useState<number | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
-  const [supported, setSupported] = useState(true);
-  const [isSafari, setIsSafari] = useState(false);
+  // Starts at the desktop/ready placeholder so the server-rendered markup and
+  // the first client paint are identical to what shipped before the gate
+  // existed; the real verdict lands in the effect below.
+  const [capabilities, setCapabilities] =
+    useState<CapabilityVerdict>(ASSUME_READY);
 
   // Cloud beta: engine choice + the cloud run's own state machine. With
   // NEXT_PUBLIC_CLOUD_API unset, cloudEnabled is false, the toggle never
@@ -576,28 +699,22 @@ export default function StudioApp() {
     setCloudState({ status: "idle" });
   }, [revokeCloudObjectUrls]);
 
-  // Feature-detect instead of crashing mid-pipeline on Safari/mobile gaps.
+  // Classify the platform once, instead of crashing mid-pipeline on a device
+  // that was never going to finish. The API probes alone all pass on a modern
+  // iPhone, which is exactly how phones used to reach the decode error — see
+  // ./capabilities.ts for the reasoning behind each verdict.
   useEffect(() => {
-    const ok =
-      typeof window !== "undefined" &&
-      typeof window.MediaRecorder !== "undefined" &&
-      typeof window.AudioContext !== "undefined" &&
-      typeof window.Worker !== "undefined" &&
-      typeof window.OfflineAudioContext !== "undefined" &&
-      typeof HTMLCanvasElement !== "undefined" &&
-      "captureStream" in HTMLCanvasElement.prototype;
-    setSupported(ok);
-
-    // Safari passes the probes but can still refuse the final render step —
-    // advise, don't block.
-    const ua = navigator.userAgent.toLowerCase();
-    setIsSafari(
-      ua.includes("safari") &&
-        !ua.includes("chrome") &&
-        !ua.includes("chromium") &&
-        !ua.includes("edg")
-    );
+    const verdict = classifyPlatform(readBrowserCapabilities(cloudEnabled));
+    setCapabilities(verdict);
+    // On a phone with a cloud engine configured, cloud is the path that
+    // actually works — preselect it before the user picks a file. The
+    // on-device chip stays there for anyone who wants to try anyway.
+    if (verdict.gate === "cloud-only") setEngine("cloud");
   }, []);
+
+  // Views that accept a file at all: desktop-ready, or mobile-with-cloud.
+  const acceptsFiles =
+    capabilities.gate === "ready" || capabilities.gate === "cloud-only";
 
   const handleFileSelect = useCallback(async (picked: File) => {
     setFileError(null);
@@ -673,7 +790,11 @@ export default function StudioApp() {
       const alreadyHandled = e.defaultPrevented; // the dropzone took this one
       e.preventDefault();
       if (alreadyHandled) return;
-      if (!supported || state.status !== "idle" || cloudState.status !== "idle")
+      if (
+        !acceptsFiles ||
+        state.status !== "idle" ||
+        cloudState.status !== "idle"
+      )
         return;
       const dropped = e.dataTransfer?.files?.[0];
       if (dropped) void handleFileSelect(dropped);
@@ -684,7 +805,7 @@ export default function StudioApp() {
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [supported, state.status, cloudState.status, handleFileSelect]);
+  }, [acceptsFiles, state.status, cloudState.status, handleFileSelect]);
 
   // Move focus to the new view's heading on every state switch so screen
   // readers and keyboard users land somewhere meaningful (skip initial mount).
@@ -709,8 +830,10 @@ export default function StudioApp() {
 
       <div className="relative flex-1 py-14 sm:py-20">
         <Container>
-          {!supported ? (
+          {capabilities.gate === "missing-apis" ? (
             <UnsupportedView />
+          ) : capabilities.gate === "mobile-blocked" ? (
+            <MobileUnsupportedView verdict={capabilities} />
           ) : cloudState.status === "uploading" ||
             cloudState.status === "queued" ||
             cloudState.status === "processing" ? (
@@ -786,10 +909,17 @@ export default function StudioApp() {
                   0–100, and cuts 9:16 captioned clips — no upload, no queue.
                 </p>
               </div>
-              {isSafari ? (
+              {capabilities.isDesktopSafari ? (
                 <p className="mx-auto mb-6 max-w-xl rounded-xl border border-ember-500/30 bg-ember-500/[0.06] px-4 py-2.5 text-center text-xs leading-relaxed text-ember-300">
                   Studio works best in Chrome, Edge, or Firefox — Safari may
                   block the final render step.
+                </p>
+              ) : null}
+              {capabilities.gate === "cloud-only" ? (
+                <p className="mx-auto mb-6 max-w-xl rounded-xl border border-brand-500/30 bg-brand-500/[0.06] px-4 py-2.5 text-center text-xs leading-relaxed text-brand-200">
+                  You&apos;re on a phone, so Studio is set to the cloud engine —
+                  your video uploads, the server does the work, and the clips
+                  come back here. The on-device engine is desktop-only.
                 </p>
               ) : null}
               <StudioDropzone
@@ -804,7 +934,11 @@ export default function StudioApp() {
                 onGenerate={handleGenerate}
               />
               {cloudEnabled ? (
-                <EngineToggle engine={engine} onChange={setEngine} />
+                <EngineToggle
+                  engine={engine}
+                  onChange={setEngine}
+                  mobile={capabilities.isMobile}
+                />
               ) : null}
             </div>
           ) : state.status === "running" ? (
@@ -825,11 +959,16 @@ export default function StudioApp() {
             </div>
           ) : (
             <div className="animate-rise">
+              {/* Device-pipeline failure. On a phone this is very likely the
+                  platform, not the file — offer a way out, not a retry loop.
+                  (The cloud ErrorView above stays as-is: a cloud failure is
+                  the server's, and retrying there is a real option.) */}
               <ErrorView
                 message={friendlyErrorMessage(state.message)}
                 canRetry={file !== null}
                 onRetry={handleGenerate}
                 onPickAnother={handleReset}
+                showMobileHelp={capabilities.isMobile}
               />
             </div>
           )}

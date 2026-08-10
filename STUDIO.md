@@ -28,8 +28,14 @@ No new npm dependencies. TypeScript strict. No `any` unless unavoidable.
   (report progress via FileReader or Response streaming if easy; otherwise
   call onProgress(-1) once), decode with `AudioContext.decodeAudioData`, then
   resample/mix to mono 16 kHz with `OfflineAudioContext`. Return
-  `{ pcm: Float32Array, duration }`. Close/free contexts when done. Wrap
-  decode failures in a clear Error ("Couldn't read this file's audio…").
+  `{ pcm: Float32Array, duration }`. Close/free contexts when done.
+  On failure, do NOT blame the file by default: re-probe it with a `<video>`
+  element (object URL, `preload="metadata"`, 4 s timeout, URL always revoked)
+  and pick the message from what the platform says — browser can play it →
+  "this browser can't extract audio from video files" (the WebKit/iOS case);
+  can't play it → the codec/DRM sentence; allocation failure or a very large
+  file → an honest size message. A decode that "succeeds" with a 0-length
+  buffer takes the same path. The probe is best-effort and never throws.
 - `computeAudioFeatures(pcm, sampleRate)`: hop = 0.05 s. RMS per hop,
   normalized so the 95th percentile maps to 1 (clamp 0..1). Silence spans:
   normalized RMS < 0.08 sustained ≥ 0.35 s, merged within 0.1 s gaps.
@@ -118,7 +124,13 @@ Badge "Beta", right side: link "Live demo" → /demo). States:
   On file choose: probe duration via a temp video element; reject > 20 min
   with a friendly message (suggest trimming); show file chip (name, duration,
   size) + primary Button "Find my clips" that calls run(file, settings);
-  watermark: true always (free tier).
+  watermark: from the signed-in plan's entitlements (`useAccount()` →
+  `/v1/me` → `entitlements.watermark_required`, already the EFFECTIVE plan).
+  Signed out, still loading, or Free → true, which is every build with
+  `NEXT_PUBLIC_CLOUD_API` unset. Honest boundary: device renders happen on
+  the visitor's own hardware, so this is soft client-side enforcement — a
+  determined user can edit the flag. Cloud renders make the same decision
+  server-side (ACCOUNTS.md), which is the one that counts.
 - **running**: stage checklist (Read audio → Load AI model → Transcribe →
   Score moments → Render clips) — done stages get a signal check, current
   stage shows an animated bar (indeterminate when progress < 0, else %) and
@@ -131,12 +143,28 @@ Badge "Beta", right side: link "Live demo" → /demo). States:
   (MP4/WEBM), reason line, tip line (ember tint), hooks: top 3 as list with
   A/B/C mono markers ("Recommended" signal Badge on the first), primary
   Button "Download" as an <a download={`clipcatalyst-${i + 1}.${ext}`}
-  href={url}>, secondary "Clip another video" → reset(). Footnote: exports
-  include the beta watermark; MP4 vs WebM depends on the browser.
+  href={url}>, secondary "Clip another video" → reset(). Footnote: MP4 vs
+  WebM depends on the browser, prefixed with "exports include the beta
+  watermark" only when the run actually drew one.
 - **error**: Card with the message, ember tone, "Try another video" → reset().
-Also handle: browsers without MediaRecorder/AudioContext — show a friendly
-"Studio needs a modern desktop browser (Chrome, Edge, or Firefox)" state
-instead of crashing (feature-detect in an effect).
+  On a phone the card also links to the tour and the waitlist — "try again"
+  is not a real option there.
+- **phone/tablet**: decided BEFORE any file is picked by
+  `components/studio/capabilities.ts` (`classifyPlatform` — pure, import-free,
+  covered by `npm run test:capabilities`). API feature-detection alone is not
+  a gate: all five probes pass on a modern iPhone, which is how phones used to
+  reach the pipeline and fail inside `decodeAudioData`. Verdicts:
+  `ready` (desktop, all APIs) → today's flow; `missing-apis` (desktop, an API
+  absent) → the "needs a modern desktop browser" card, unchanged;
+  `cloud-only` (mobile + `NEXT_PUBLIC_CLOUD_API` set) → nothing blocked, cloud
+  preselected, the on-device chip relabelled "On-device (desktop)";
+  `mobile-blocked` (mobile, no cloud) → an honest phone card that names the
+  real reason (iOS = WebKit won't decode a video container's audio + memory;
+  elsewhere = the pipeline outweighs a phone tab) and always offers next steps
+  (product tour, `/#waitlist`, back home). It must never tell a phone user
+  their browser is "missing recording APIs".
+  iPadOS ≥ 13 sends a verbatim macOS Safari UA — it is identified by
+  `maxTouchPoints > 1`, and a real Mac (0 touch points) must stay on `ready`.
 
 ### Site integration (existing files)
 - Navbar links: add { href: "/studio", label: "Studio" } before "Live demo".

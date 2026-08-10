@@ -1,10 +1,11 @@
 """Behavioural tests for the shared crop-track math.
 
-The first sixteen assertions mirror, one for one, the TypeScript suite that
-guards ``lib/studio/croptrack.ts`` (the frozen original). The last test is the
-one that keeps the port honest over time: it compiles the TypeScript, runs both
-implementations over an identical sample set, and demands the crop centers
-agree. If it ever fails, the Python side is the side that moves.
+The first twenty-one assertions mirror, one for one, the TypeScript suite that
+guards ``lib/studio/croptrack.ts`` (the reference implementation). The last two
+tests are the ones that keep the port honest over time: they compile the
+TypeScript, run both implementations over an identical sample set, and demand
+the crop centers agree. If they ever fail, the Python side is the side that
+moves.
 """
 
 from __future__ import annotations
@@ -35,29 +36,48 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_SOURCE = REPO_ROOT / "lib" / "studio" / "croptrack.ts"
 
 
-def _steps(stop: float, step: float) -> list[float]:
-    """Reproduce ``for (let t = 0; t <= stop; t += step)`` accumulation exactly.
+def _opts(duration: float) -> CropTrackOptions:
+    """``{ ...OPTS, duration }`` -- same aspects, different clip length."""
+    return CropTrackOptions(duration=duration, target_aspect=9 / 16, source_aspect=16 / 9)
 
-    The JS suite accumulates its loop variable, so 0.2-second steps drift the
+
+def _steps(stop: float, step: float, start: float = 0.0) -> list[float]:
+    """Reproduce ``for (let t = start; t <= stop; t += step)`` accumulation exactly.
+
+    The JS suite accumulates its loop variable, so 0.05-second steps drift the
     same way in both languages. Using a multiply-by-index range here would feed
     the two implementations subtly different timestamps.
     """
     out: list[float] = []
-    t = 0.0
+    t = start
     while t <= stop:
         out.append(t)
         t += step
     return out
 
 
-def _steps_lt(stop: float, step: float) -> list[float]:
+def _steps_lt(stop: float, step: float, start: float = 0.0) -> list[float]:
     """Same, for the exclusive ``t < stop`` loops."""
     out: list[float] = []
-    t = 0.0
+    t = start
     while t < stop:
         out.append(t)
         t += step
     return out
+
+
+def _travel(tr, stop: float, step: float, start: float = 0.0) -> float:
+    """Total width of the camera's excursion over a time window."""
+    centers = [crop_center_at(tr, t) for t in _steps(stop, step, start)]
+    return max(centers) - min(centers)
+
+
+def _max_speed(tr, stop: float, step: float, start: float = 0.0) -> float:
+    """Fastest the camera moves over a window, in fraction of width per second."""
+    return max(
+        abs(crop_center_at(tr, t + step) - crop_center_at(tr, t)) / step
+        for t in _steps_lt(stop, step, start)
+    )
 
 
 # --- 1. geometry -----------------------------------------------------------
@@ -130,10 +150,7 @@ def test_camera_travels_rightward() -> None:
 
 def test_respects_pan_speed_ceiling() -> None:
     tr = build_crop_track(_walking_subject(), OPTS)
-    max_v = 0.0
-    for t in _steps_lt(10, 0.1):
-        v = abs(crop_center_at(tr, t + 0.1) - crop_center_at(tr, t)) / 0.1
-        max_v = max(max_v, v)
+    max_v = _max_speed(tr, 10, 0.1)
     assert max_v <= 0.145, f"maxV={max_v:.4f}"
 
 
@@ -155,26 +172,87 @@ def test_crop_window_stays_inside_the_frame() -> None:
     assert in_bounds, f"bounds {LO:.3f}..{HI:.3f}"
 
 
-# --- 7. face lost mid-clip -> holds, then eases back toward center ---------
+# --- 7. sparse coverage: too little signal to pan -------------------------
+# Hold the framing we actually saw rather than inventing a drift.
 
 
-def _lost_face_track():
+def _sparse_coverage_track():
     s = [FaceSample(t=t, cx=0.75, size=0.2, score=0.9) for t in _steps(3, 0.5)]
-    return build_crop_track(
-        s, CropTrackOptions(duration=12, target_aspect=9 / 16, source_aspect=16 / 9)
-    )
+    return build_crop_track(s, _opts(12))
 
 
-def test_holds_position_briefly_after_losing_face() -> None:
-    held = crop_center_at(_lost_face_track(), 3.8)  # still within HOLD_S
-    assert abs(held - 0.75) < 0.12, f"got {held:.3f}"
+def test_sparse_coverage_gives_a_locked_frame() -> None:
+    tr = _sparse_coverage_track()
+    assert tr.is_static, f"keyframes={len(tr.keyframes)} coverage={tr.coverage:.2f}"
 
 
-def test_drifts_back_toward_center_eventually() -> None:
-    tr = _lost_face_track()
-    held = crop_center_at(tr, 3.8)
-    later = crop_center_at(tr, 11.5)  # long after
-    assert abs(later - 0.5) < abs(held - 0.5), f"held={held:.3f} later={later:.3f}"
+def test_locked_frame_sits_on_the_subject() -> None:
+    tr = _sparse_coverage_track()
+    got = crop_center_at(tr, 6)
+    assert abs(got - 0.75) < 0.02, f"got {got:.3f}"
+
+
+# --- 7b. REGRESSION: a motionless subject with an ordinary detector dropout
+#         must not produce visible movement. This shipped at 47% of the frame.
+
+
+def test_dropout_on_a_still_subject_shows_no_visible_drift() -> None:
+    s = [
+        FaceSample(t=t, cx=0.25, size=0.2, score=0.9)
+        for t in _steps(30, 0.5)
+        # 3s dropout, entirely routine on real footage
+        if not (t > 10 and t < 13)
+    ]
+    tr = build_crop_track(s, _opts(30))
+    travel = _travel(tr, 30, 0.1)
+    assert travel < 0.02, f"travel={travel:.4f} of width"
+
+
+# --- 7c. a genuinely long absence still releases toward center -- but gently.
+
+
+def test_recenter_drift_is_slower_than_a_real_pan() -> None:
+    s = [FaceSample(t=t, cx=0.75, size=0.2, score=0.9) for t in _steps(14, 0.5)]
+    s += [FaceSample(t=t, cx=0.75, size=0.2, score=0.9) for t in _steps(30, 0.5, start=20)]
+    tr = build_crop_track(s, _opts(30))
+    max_v = _max_speed(tr, 20, 0.1, start=14)
+    assert max_v <= 0.036, f"maxV={max_v:.4f} (cap 0.035)"
+
+
+# --- 7d. a stray single detection must never define the clip's framing -----
+
+
+def test_one_stray_detection_is_ignored_entirely() -> None:
+    tr = build_crop_track([FaceSample(t=20, cx=0.85, size=0.09, score=0.95)], _opts(30))
+    got = crop_center_at(tr, 0)
+    assert tr.is_static
+    assert abs(got - 0.5) < 1e-6, f"cx={got:.4f}"
+
+
+# --- 7e. hard cut: the new speaker must be in frame almost immediately -----
+#         not after a multi-second glide.
+
+
+def test_cut_puts_subject_in_frame_within_about_1_5s() -> None:
+    s = [FaceSample(t=t, cx=0.22, size=0.2, score=0.9) for t in _steps(8, 0.5)]
+    s += [FaceSample(t=t, cx=0.78, size=0.2, score=0.9) for t in _steps(20, 0.5, start=8.5)]
+    tr = build_crop_track(s, _opts(20))
+    # Allow the 2-sample confirmation window, then the subject must be in frame.
+    cam = crop_center_at(tr, 10.0)
+    assert abs(cam - 0.78) <= HALF, f"cam={cam:.3f} needs |cam-0.78|<={HALF:.3f}"
+
+
+# --- 7f. ...but a single outlier detection must NOT trigger a cut-snap -----
+
+
+def test_single_outlier_does_not_fling_the_frame() -> None:
+    s = [
+        FaceSample(t=t, cx=0.9 if abs(t - 10) < 0.01 else 0.25, size=0.2, score=0.9)
+        for t in _steps(20, 0.5)
+    ]
+    tr = build_crop_track(s, _opts(20))
+    max_dev = max(abs(crop_center_at(tr, t) - 0.25) for t in _steps(20, 0.1))
+    assert max_dev < 0.05, f"maxDev={max_dev:.4f}"
 
 
 # --- 8. two faces: detector flip-flopping must not make the camera pan -----
@@ -212,9 +290,7 @@ def _thrashing_track():
         FaceSample(t=t, cx=0.5 + 0.35 * math.sin(t * 2.3), size=0.2, score=0.9)
         for t in _steps(60, 0.2)
     ]
-    return build_crop_track(
-        s, CropTrackOptions(duration=60, target_aspect=9 / 16, source_aspect=16 / 9)
-    )
+    return build_crop_track(s, _opts(60))
 
 
 def test_keyframe_count_capped() -> None:
@@ -258,7 +334,7 @@ process.stdout.write(JSON.stringify({
 
 @pytest.fixture(scope="session")
 def js_module(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Compile the frozen TypeScript to an importable ES module, or skip."""
+    """Compile the reference TypeScript to an importable ES module, or skip."""
     tmp_path = tmp_path_factory.mktemp("croptrack-ts")
     node = shutil.which("node")
     if not node:
@@ -370,6 +446,66 @@ def test_matches_typescript_implementation(js_module: Path) -> None:
     for a, b in zip(py.keyframes, ts["keyframes"]):
         assert abs(a.t - b["t"]) < 1e-9
         assert abs(a.cx - b["cx"]) < 1e-9
+
+
+def test_matches_typescript_on_a_hard_cut(js_module: Path) -> None:
+    """Cross-check the escapes from the smoothing model, not just the smoothing.
+
+    A cut exercises jump confirmation, the instant re-aim and the acceleration
+    limiter on the far side of it -- the newest and most order-sensitive part of
+    ``simulate``. A port that got the confirmation counter or the overshoot
+    guard subtly wrong would still track a straight pan correctly.
+    """
+    samples = [FaceSample(t=t, cx=0.22, size=0.2, score=0.9) for t in _steps(8, 0.5)]
+    samples += [
+        FaceSample(t=t, cx=0.78, size=0.2, score=0.9) for t in _steps(20, 0.5, start=8.5)
+    ]
+    opts = CropTrackOptions(duration=20, target_aspect=9 / 16, source_aspect=16 / 9)
+    times = [i * 0.25 for i in range(81)]
+
+    ts = _run_ts(js_module, samples, opts, times)
+    py = build_crop_track(samples, opts)
+
+    assert py.is_static == ts["isStatic"]
+    for t, mine, theirs in zip(times, (crop_center_at(py, t) for t in times), ts["centers"]):
+        assert abs(mine - theirs) < 1e-9, f"t={t:.3f}: python={mine!r} ts={theirs!r}"
+    assert len(py.keyframes) == len(ts["keyframes"])
+    for a, b in zip(py.keyframes, ts["keyframes"]):
+        assert abs(a.t - b["t"]) < 1e-9
+        assert abs(a.cx - b["cx"]) < 1e-9
+
+
+def test_matches_typescript_when_the_subject_is_lost_near_the_end(
+    js_module: Path,
+) -> None:
+    """Cross-check the tail branch, which once diverged silently.
+
+    When the hold expires inside the final ``TAIL_HOLD_S`` the camera freezes
+    where it stands rather than recentering *or* re-aiming at the stale target.
+    Both engines gained that branch at different moments, and every existing
+    cross-check kept passing while they disagreed: the straight pan and the hard
+    cut both re-acquire the subject, so neither ever reaches this code. A clip
+    whose subject simply stops being detected before the end does.
+    """
+    samples = [
+        FaceSample(t=t, cx=0.20 + (t / 20) * 0.12, size=0.2, score=0.9)
+        for t in _steps(15, 0.5)
+    ]
+    opts = CropTrackOptions(duration=20, target_aspect=9 / 16, source_aspect=16 / 9)
+    times = [i * 0.25 for i in range(81)]
+
+    ts = _run_ts(js_module, samples, opts, times)
+    py = build_crop_track(samples, opts)
+
+    assert py.is_static == ts["isStatic"]
+    for t, theirs in zip(times, ts["centers"]):
+        assert abs(crop_center_at(py, t) - theirs) < 1e-9, f"t={t:.3f}"
+
+    # And the behaviour itself: the last second must hold still. Not bitwise
+    # frozen -- keyframe thinning leaves a residual of order 1e-4 -- but far
+    # below anything an eye could catch (5e-4 of width is ~1px at 1920).
+    tail = [crop_center_at(py, 19.0 + i * 0.05) for i in range(21)]
+    assert max(tail) - min(tail) < 5e-4, f"camera moved in the final second: {tail}"
 
 
 def test_matches_typescript_rounding_of_coverage(js_module: Path) -> None:

@@ -55,7 +55,7 @@ class ClipOut(BaseModel):
 class JobStatusResponse(BaseModel):
     job_id: str
     status: str  # awaiting_upload | queued | processing | done | failed
-    stage: str  # "" | probe | transcribe | analyze | render
+    stage: str  # "" | probe | transcribe | analyze | reframe | render
     progress: float
     detail: str
     error: str | None = None

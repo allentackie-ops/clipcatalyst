@@ -15,22 +15,26 @@ b-roll, a back of a head) returns `[]`, which `build_crop_track` turns into a
 centered track. Only ffmpeg failing to *launch* raises — a bad detection day
 must never fail a render.
 
-Horizontal values are normalized to the source width (0..1), matching
-`croptrack.py`; uniform scaling means x/320 on the detect frame is already the
-same fraction on the source.
+Horizontal values are normalized to the *displayed* source width (0..1),
+matching `croptrack.py` and the `iw` the renderer's crop filter sees; uniform
+scaling means x/320 on the detect frame is already the same fraction on the
+source.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 from ..settings import Settings
 from .croptrack import FaceSample
-from .types import PipelineError
+from .types import MediaInfo, PipelineError
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +52,11 @@ MIN_NEIGHBORS = 4
 CASCADE_NAME = "haarcascade_frontalface_default.xml"
 
 _OFF_VALUES = {"", "0", "off", "false", "no", "none", "disabled"}
+
+#: How ffmpeg reports a display matrix, in both the banner and ffprobe's JSON.
+_ROTATION_RE = re.compile(r"rotation of (-?\d+(?:\.\d+)?) degrees")
+#: The older QuickTime spelling of the same thing: a stream-level `rotate` tag.
+_ROTATE_TAG_RE = re.compile(r"^\s*rotate\s*:\s*(-?\d+(?:\.\d+)?)\s*$", re.MULTILINE)
 
 _NO_FFMPEG = (
     "ffmpeg is not available, so the clip could not be scanned for faces. "
@@ -67,6 +76,7 @@ def detect_faces(
     end: float,
     settings: Settings,
     on_progress: ProgressFn | None = None,
+    info: MediaInfo | None = None,
 ) -> list[FaceSample]:
     """Sample `[start, end]` at ~2 Hz and return every face found.
 
@@ -75,6 +85,9 @@ def detect_faces(
     `start`. Returns `[]` (never raises) when tracking is off, OpenCV is
     missing, the cascade won't load, ffmpeg exits non-zero, or simply nothing
     was found. Raises `PipelineError` only if ffmpeg cannot be executed at all.
+
+    Pass `info` when the caller already probed this file (the worker holds one
+    for the whole job) — otherwise every clip pays for its own probe.
     """
     duration = float(end) - float(start)
     if duration <= 0:
@@ -91,11 +104,12 @@ def detect_faces(
         return []
     cv2, np, cascade = detector
 
-    height = _detect_height(video_path, settings)
-    if height is None:
+    size = _detect_size(video_path, settings, info)
+    if size is None:
         return []
-    frame_bytes = DETECT_WIDTH * height * 3
-    min_side = max(8, int(DETECT_WIDTH * MIN_FACE_FRACTION))
+    width, height = size
+    frame_bytes = width * height * 3
+    min_side = max(8, int(width * MIN_FACE_FRACTION))
     # A couple of frames of slack: fps filtering can emit one extra at the tail.
     max_frames = int(duration * SAMPLE_FPS) + 4
 
@@ -114,7 +128,7 @@ def detect_faces(
         "-an",
         "-sn",
         "-vf",
-        f"fps={SAMPLE_FPS:g},scale={DETECT_WIDTH}:{height}",
+        f"fps={SAMPLE_FPS:g},scale={width}:{height}",
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -137,16 +151,14 @@ def detect_faces(
             if buffer is None:
                 break
             t = index / SAMPLE_FPS
-            frame = np.frombuffer(buffer, dtype=np.uint8).reshape(
-                height, DETECT_WIDTH, 3
-            )
+            frame = np.frombuffer(buffer, dtype=np.uint8).reshape(height, width, 3)
             for face in _detect_frame(cv2, cascade, frame, min_side):
                 x, _y, w, _h = face
                 samples.append(
                     FaceSample(
                         t=round(t, 3),
-                        cx=(float(x) + float(w) / 2) / DETECT_WIDTH,
-                        size=float(w) / DETECT_WIDTH,
+                        cx=(float(x) + float(w) / 2) / width,
+                        size=float(w) / width,
                         score=1.0,
                     )
                 )
@@ -207,25 +219,143 @@ def _detect_frame(cv2, cascade, frame, min_side: int):
     return [tuple(int(v) for v in face) for face in found]
 
 
-def _detect_height(video_path: str | Path, settings: Settings) -> int | None:
-    """Frame height at DETECT_WIDTH, so we know how many bytes a frame is.
+def _detect_size(
+    video_path: str | Path, settings: Settings, info: MediaInfo | None = None
+) -> tuple[int, int] | None:
+    """`(width, height)` of the frames ffmpeg will put on the pipe, or None.
 
     `scale=320:-1` reads better but leaves the reader guessing at the row
     count, and a wrong guess silently shears every frame into nonsense the
-    detector might still fire on. Probe once, pass an explicit height, and give
-    up on tracking (None) rather than guess — a source we can't measure is one
-    the render will report on anyway.
+    detector might still fire on. So we pass an explicit height — and it has to
+    be the height of the frame ffmpeg *emits*, not the one stored in the file.
+
+    Those differ constantly. ffmpeg autorotates from the display matrix on the
+    way in, before the filtergraph, and every phone shooting portrait stores a
+    landscape stream plus a quarter-turn matrix. Sizing from those coded
+    dimensions force-scales an upright 9:16 frame into a 16:9 box, which
+    stretches every face to twice its width — past what Haar will accept, so
+    detection quietly drops to zero on the most common source there is.
+
+    Give up on tracking (None) rather than guess: a source we can't measure is
+    one the render will report on anyway.
     """
+    source = _source_size(video_path, settings, info)
+    if source is None:
+        return None
+    width, height = source
+    if _is_sideways(_display_rotation(video_path, settings)):
+        width, height = height, width
+    return DETECT_WIDTH, max(2, round(DETECT_WIDTH * height / width))
+
+
+def _source_size(
+    video_path: str | Path, settings: Settings, info: MediaInfo | None
+) -> tuple[int, int] | None:
+    """Coded frame size — from the caller's probe when it already has one."""
+    if info is not None and info.width > 0 and info.height > 0:
+        return info.width, info.height
     try:
         from .probe import probe_media  # noqa: PLC0415 — avoids an import cycle
 
-        info = probe_media(video_path, settings)
+        probed = probe_media(video_path, settings)
     except Exception:
         log.info("could not probe %s for face tracking", video_path)
         return None
-    if info.width <= 0 or info.height <= 0:
+    if probed.width <= 0 or probed.height <= 0:
         return None
-    return max(2, round(DETECT_WIDTH * info.height / info.width))
+    return probed.width, probed.height
+
+
+def _is_sideways(rotation: float) -> bool:
+    """True when the display matrix turns the picture a quarter turn."""
+    try:
+        return round(abs(float(rotation))) % 180 == 90
+    except (TypeError, ValueError):
+        return False
+
+
+def _display_rotation(video_path: str | Path, settings: Settings) -> float:
+    """Degrees ffmpeg will rotate this file by on decode; 0 when we can't tell.
+
+    Memoized on the file's identity: a job scans the same source once per clip,
+    and its display matrix cannot change underneath us.
+    """
+    path = Path(video_path)
+    try:
+        stat = path.stat()
+        fingerprint: tuple[int, int] | None = (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        fingerprint = None  # unreadable; the size lookup will have said so too
+    return _rotation_of(str(path), fingerprint, settings.ffprobe_bin, settings.ffmpeg_bin)
+
+
+@lru_cache(maxsize=32)
+def _rotation_of(
+    path: str,
+    fingerprint: tuple[int, int] | None,
+    ffprobe_bin: str,
+    ffmpeg_bin: str,
+) -> float:
+    """ffprobe's answer, else the `ffmpeg -i` banner's, else "no rotation"."""
+    for reader, binary in (
+        (_rotation_from_ffprobe, ffprobe_bin),
+        (_rotation_from_ffmpeg, ffmpeg_bin),
+    ):
+        try:
+            degrees = reader(binary, path)
+        except Exception:  # missing binary, timeout, unparseable output
+            log.debug("could not read rotation via %s", binary, exc_info=True)
+            continue
+        if degrees is not None:
+            return degrees
+    return 0.0
+
+
+def _rotation_from_ffprobe(binary: str, path: str) -> float | None:
+    """Display-matrix rotation from ffprobe JSON; None when it can't answer."""
+    proc = subprocess.run(
+        [
+            binary,
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_streams",
+            "-print_format",
+            "json",
+            path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        return None
+    streams = json.loads(proc.stdout or "{}").get("streams") or []
+    if not streams:
+        return None
+    stream = streams[0]
+    for side_data in stream.get("side_data_list") or []:
+        rotation = side_data.get("rotation")
+        if rotation is not None:
+            return float(rotation)
+    tag = (stream.get("tags") or {}).get("rotate")
+    return float(tag) if tag is not None else 0.0
+
+
+def _rotation_from_ffmpeg(binary: str, path: str) -> float | None:
+    """Same, parsed from the `ffmpeg -i` banner — used when ffprobe is absent."""
+    proc = subprocess.run(
+        [binary, "-hide_banner", "-i", path],  # exits non-zero: no output file
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    stderr = proc.stderr or ""
+    if "Video:" not in stderr:
+        return None  # nothing decodable was reported — don't invent an answer
+    match = _ROTATION_RE.search(stderr) or _ROTATE_TAG_RE.search(stderr)
+    return float(match.group(1)) if match else 0.0
 
 
 def _read_exactly(stream, count: int) -> bytes | None:

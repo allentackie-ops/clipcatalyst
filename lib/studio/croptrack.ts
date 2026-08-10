@@ -252,12 +252,19 @@ function simulate(
     let aim = target;
     let tau = SMOOTH_TAU;
     let vcap = MAX_PAN_PER_SEC;
-    // Don't begin a drift we can't finish: a clip ending mid-move looks broken,
-    // and the last frame is what loops on TikTok and Reels.
-    if (gap > HOLD_S && t < duration - TAIL_HOLD_S) {
-      aim = center;
-      tau = RECENTER_TAU;
-      vcap = RECENTER_MAX_PAN_PER_SEC;
+    if (gap > HOLD_S) {
+      if (t < duration - TAIL_HOLD_S) {
+        // Subject long gone: release slowly toward center.
+        aim = center;
+        tau = RECENTER_TAU;
+        vcap = RECENTER_MAX_PAN_PER_SEC;
+      } else {
+        // Too late to start (or finish) a move. Freeze exactly where we are —
+        // aiming back at the stale target would walk the frame backwards in
+        // the final second, which is the frame that loops on Reels and TikTok.
+        aim = cam;
+        vcap = 0;
+      }
     }
 
     const alpha = 1 - Math.exp(-step / tau);

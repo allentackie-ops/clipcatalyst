@@ -23,13 +23,19 @@ from clipcatalyst_api.pipeline.facetrack import (
     detect_faces,
     face_tracking_enabled,
 )
-from clipcatalyst_api.pipeline.types import PipelineError
+from clipcatalyst_api.pipeline.types import MediaInfo, PipelineError
 from clipcatalyst_api.settings import get_settings
 
 SOURCE_W, SOURCE_H = 640, 360
 SOURCE_FPS = 15
 MOVING_SECONDS = 8.0
 FACE_WIDTH = 150  # ~23% of frame width — comfortably above the 8% minimum
+
+# A phone-shaped portrait clip: displayed 360x640, stored as landscape pixels.
+PORTRAIT_W, PORTRAIT_H = 360, 640
+PORTRAIT_SECONDS = 4.0
+PORTRAIT_FACE_WIDTH = 110  # ~31% of the displayed width
+PORTRAIT_FACE_CX = 0.3  # fraction of the DISPLAYED width
 
 
 @pytest.fixture()
@@ -71,13 +77,14 @@ def draw_face(frame: np.ndarray, cx: int, cy: int, width: int) -> None:
     )
 
 
-def encode(path: Path, frames, ffmpeg: str) -> Path:
+def encode(path: Path, frames, ffmpeg: str, size: tuple[int, int] | None = None) -> Path:
     """Encode BGR frames to H.264 — the detector sees compressed video, as in life."""
+    width, height = size or (SOURCE_W, SOURCE_H)
     proc = subprocess.Popen(
         [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "bgr24",
-            "-s", f"{SOURCE_W}x{SOURCE_H}", "-r", str(SOURCE_FPS), "-i", "-",
+            "-s", f"{width}x{height}", "-r", str(SOURCE_FPS), "-i", "-",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
             "-pix_fmt", "yuv420p", str(path),
         ],
@@ -133,6 +140,44 @@ def two_face_video(tmp_path_factory: pytest.TempPathFactory, ffmpeg_bin: str) ->
 
     path = tmp_path_factory.mktemp("faces") / "two.mp4"
     return encode(path, frames(), ffmpeg_bin)
+
+
+@pytest.fixture(scope="module")
+def rotated_portrait_video(
+    tmp_path_factory: pytest.TempPathFactory, ffmpeg_bin: str
+) -> Path:
+    """What a phone actually uploads: landscape pixels plus a rotation tag.
+
+    Phones record the sensor's landscape frame and describe the quarter turn in
+    the container's display matrix. ffmpeg applies that turn on decode, before
+    any filter runs, so what reaches the detector is an upright 360x640 frame —
+    while ffprobe still reports the coded 640x360. The stored picture here is
+    therefore the portrait frame rotated a quarter turn, exactly the shape that
+    sizing the pipe from coded dimensions would wrongly squash it back into.
+    """
+    upright = np.full((PORTRAIT_H, PORTRAIT_W, 3), 90, np.uint8)
+    draw_face(
+        upright, int(PORTRAIT_FACE_CX * PORTRAIT_W), PORTRAIT_H // 2, PORTRAIT_FACE_WIDTH
+    )
+    coded = np.ascontiguousarray(np.rot90(upright))  # ffmpeg turns it back
+    count = int(PORTRAIT_SECONDS * SOURCE_FPS)
+
+    directory = tmp_path_factory.mktemp("faces")
+    flat = encode(
+        directory / "coded.mp4",
+        (coded for _ in range(count)),
+        ffmpeg_bin,
+        size=(PORTRAIT_H, PORTRAIT_W),
+    )
+    path = directory / "rotated.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y",
+            "-display_rotation", "-90", "-i", str(flat), "-c", "copy", str(path),
+        ],
+        check=True,
+    )
+    return path
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +262,62 @@ def test_every_face_in_a_frame_is_reported(two_face_video: Path, settings) -> No
     both = next(group for group in by_time.values() if len(group) == 2)
     left, right = sorted(both, key=lambda s: s.cx)
     assert left.cx < 0.4 < 0.6 < right.cx
+
+
+def test_rotated_portrait_source_is_detected(
+    rotated_portrait_video: Path, settings
+) -> None:
+    """A rotation tag must not cost us every detection in the clip.
+
+    ffmpeg autorotates before the filtergraph, so the pipe has to be sized for
+    the displayed 360x640 frame. Sizing it from the coded 640x360 force-scales
+    9:16 into 16:9, stretches the face to twice its width, and Haar finds
+    nothing at all — a silent zero, which is why this asserts on the hit count.
+    """
+    samples = detect_faces(rotated_portrait_video, 0.0, PORTRAIT_SECONDS, settings)
+
+    assert len(samples) >= PORTRAIT_SECONDS, f"only {len(samples)} detections"
+    # cx is a fraction of the DISPLAYED width (360), never the coded one (640).
+    assert all(abs(s.cx - PORTRAIT_FACE_CX) < 0.06 for s in samples), [
+        s.cx for s in samples
+    ]
+    assert all(0.2 < s.size < 0.45 for s in samples), [s.size for s in samples]
+
+
+def test_rotation_is_respected_when_the_caller_supplies_the_probe(
+    rotated_portrait_video: Path, settings
+) -> None:
+    """The threaded MediaInfo carries coded dimensions — rotation still applies."""
+    coded = MediaInfo(
+        duration=PORTRAIT_SECONDS, width=PORTRAIT_H, height=PORTRAIT_W, has_audio=False
+    )
+    samples = detect_faces(
+        rotated_portrait_video, 0.0, PORTRAIT_SECONDS, settings, info=coded
+    )
+
+    assert samples
+    assert all(abs(s.cx - PORTRAIT_FACE_CX) < 0.06 for s in samples)
+
+
+def test_a_known_media_info_replaces_the_probe(
+    moving_face_video: Path, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker probed the source once; a 5-clip job must not probe 5 more times."""
+    from clipcatalyst_api.pipeline import probe as probe_module
+
+    def explode(*args, **kwargs):
+        raise AssertionError("detect_faces re-probed an already-probed source")
+
+    monkeypatch.setattr(probe_module, "probe_media", explode)
+    known = MediaInfo(
+        duration=MOVING_SECONDS, width=SOURCE_W, height=SOURCE_H, has_audio=False
+    )
+    samples = detect_faces(
+        moving_face_video, 0.0, MOVING_SECONDS, settings, info=known
+    )
+
+    assert samples
+    assert samples[0].cx < 0.35 < 0.65 < samples[-1].cx
 
 
 def test_progress_is_reported_monotonically(moving_face_video: Path, settings) -> None:

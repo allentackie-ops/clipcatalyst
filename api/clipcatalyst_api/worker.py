@@ -195,6 +195,8 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
     # --- reframe (best-effort: every failure degrades to a centered crop) --
     # Detection runs for all clips before rendering starts so the stage the UI
     # shows advances once instead of alternating reframe → render → reframe.
+    # `info` rides along so detection reuses the probe above instead of
+    # spawning one of its own per clip.
     source_aspect = (
         info.width / info.height
         if info.width > 0 and info.height > 0
@@ -218,7 +220,7 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
 
         try:
             samples = detect_faces(
-                src, plan.start, plan.end, settings, on_detect_progress
+                src, plan.start, plan.end, settings, on_detect_progress, info
             )
             tracks.append(
                 build_crop_track(

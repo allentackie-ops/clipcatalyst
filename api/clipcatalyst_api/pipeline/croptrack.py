@@ -9,9 +9,10 @@ Units: every horizontal value is normalized to the SOURCE width (0..1), so the
 same track drives a 540x960 canvas and a 1080x1920 ffmpeg render.
 
 Pure, deterministic, stdlib only -- no I/O, no clock, no randomness. The
-TypeScript module is frozen; this file follows it line for line, including the
-JavaScript rounding and sort semantics (see ``_js_round``). Keep the two in step:
-``api/tests/test_croptrack.py`` cross-checks them by running both.
+TypeScript module is the reference; this file follows it line for line, including
+the JavaScript rounding and sort semantics (see ``_js_round``). Keep the two in
+step: ``api/tests/test_croptrack.py`` cross-checks them by running both, and when
+they disagree it is this file that moves.
 """
 
 from __future__ import annotations
@@ -70,12 +71,38 @@ DEADBAND = 0.018
 """Ignore target moves smaller than this (fraction of width) -- anti-jitter."""
 MAX_PAN_PER_SEC = 0.14
 """Ceiling on camera speed (fraction of width per second) -- glide, not snap."""
+MAX_ACCEL_PER_SEC2 = 0.5
+"""Ceiling on how fast the camera may change speed -- kills re-acquisition jerk."""
 SMOOTH_TAU = 0.55
 """Exponential smoothing time constant, seconds. Higher = lazier camera."""
-HOLD_S = 1.2
-"""Keep the last known position this long after losing the face."""
-RECENTER_TAU = 2.0
+HOLD_S = 3.0
+"""Keep the last known position this long after losing the face.
+
+Detectors miss frames constantly on real footage -- a head turn, a glance at
+notes, a hand near the chin. At a 2 Hz sample rate this must span several
+consecutive misses, or an ordinary dropout drags the camera off a subject who
+never moved.
+"""
+RECENTER_TAU = 6.0
 """After HOLD_S with no face, ease back to center over this long."""
+RECENTER_MAX_PAN_PER_SEC = MAX_PAN_PER_SEC / 4
+"""Recentering is a shrug, not a move: it happens when we've lost the subject,
+so it must never look as purposeful as following one."""
+TAIL_HOLD_S = 1.5
+"""Never start drifting this close to the end -- the last frame is the loop point."""
+JUMP_FACTOR = 1.0
+"""A target step beyond this (x crop half-width) is a cut, not a movement --
+people don't teleport. Gliding across it leaves the new speaker outside the
+frame for seconds."""
+JUMP_CONFIRM_SAMPLES = 2
+"""Consecutive agreeing detections before we accept a jump (2 = 1s at 2 Hz)."""
+MIN_MOTION_COVERAGE = 0.4
+"""Below this hit rate there is no motion signal worth following -- whatever
+``_simulate`` produced would be mostly invented. Lock the frame instead."""
+MIN_TRUST_COVERAGE = 0.15
+"""And below THIS, we never really saw a face at all: a couple of hits across a
+whole clip is indistinguishable from a false positive, and betting the entire
+framing on it is worse than not reframing. Fall back to center."""
 SUBJECT_SWITCH_RATIO = 1.45
 """A new face must be this much larger to steal focus from the current one."""
 SUBJECT_SWITCH_HOLD_S = 0.8
@@ -195,9 +222,13 @@ def _pick_subjects(by_time: Mapping[float, list[FaceSample]]) -> list[FaceSample
 def _simulate(subjects: list[FaceSample], duration: float, half: float) -> list[CropKeyframe]:
     """Walk a fixed timeline, easing the camera toward the subject.
 
-    Three behaviours stack: a deadband so micro-movement never moves the frame,
-    exponential smoothing so motion is gradual, and a hard velocity cap so the
-    camera can never lurch. When the face is lost we hold, then drift to center.
+    Behaviours stack, in order of how much they matter to the eye: a deadband so
+    micro-movement never moves the frame, exponential smoothing so motion is
+    gradual, a velocity cap so the camera can never lurch, and an acceleration
+    cap so it can never change direction instantly. Two escapes from that model:
+    a step too large to be human is a cut and is taken instantly, and a subject
+    lost for a long time is released slowly toward center rather than held or
+    snapped.
     """
     center = 0.5
     lo = half
@@ -208,11 +239,15 @@ def _simulate(subjects: list[FaceSample], duration: float, half: float) -> list[
 
     step = 1 / 15  # simulate at 15 Hz; keyframes are thinned afterwards
     frames: list[CropKeyframe] = []
+    jump_threshold = half * JUMP_FACTOR
 
     cam = _clamp(subjects[0].cx, lo, hi) if subjects else center
     target = cam
+    vel = 0.0
     idx = 0
     last_seen = subjects[0].t if subjects else -math.inf
+    pending_cx: float | None = None
+    pending_count = 0
 
     t = 0.0
     while t <= duration + 1e-9:
@@ -220,28 +255,64 @@ def _simulate(subjects: list[FaceSample], duration: float, half: float) -> list[
         while idx < len(subjects) and subjects[idx].t <= t:
             s = subjects[idx]
             desired = _clamp(s.cx, lo, hi)
-            # Deadband: only re-aim when the subject has genuinely moved.
-            if abs(desired - target) > DEADBAND:
-                target = desired
+
+            if abs(desired - target) > jump_threshold:
+                # Too far to be movement -- probably a cut. Demand corroboration
+                # before believing it, so one stray detection can't fling the frame.
+                if pending_cx is not None and abs(desired - pending_cx) <= jump_threshold:
+                    pending_count += 1
+                else:
+                    pending_cx = desired
+                    pending_count = 1
+                if pending_count >= JUMP_CONFIRM_SAMPLES:
+                    target = desired
+                    cam = desired  # cut, not a pan: arrive immediately
+                    vel = 0.0
+                    pending_cx = None
+                    pending_count = 0
+            else:
+                pending_cx = None
+                pending_count = 0
+                # Deadband: only re-aim when the subject has genuinely moved.
+                if abs(desired - target) > DEADBAND:
+                    target = desired
+
             last_seen = s.t
             idx += 1
 
         gap = t - last_seen
         aim = target
         tau = SMOOTH_TAU
+        vcap = MAX_PAN_PER_SEC
         if gap > HOLD_S:
-            # Face lost for a while: give up gracefully rather than freeze forever.
-            aim = center
-            tau = RECENTER_TAU
+            if t < duration - TAIL_HOLD_S:
+                # Subject long gone: release slowly toward center.
+                aim = center
+                tau = RECENTER_TAU
+                vcap = RECENTER_MAX_PAN_PER_SEC
+            else:
+                # Too late to start (or finish) a move. Freeze exactly where we
+                # are -- aiming back at the stale target would walk the frame
+                # backwards in the final second, which is the frame that loops
+                # on Reels and TikTok.
+                aim = cam
+                vcap = 0.0
 
         alpha = 1 - math.exp(-step / tau)
-        nxt = cam + (aim - cam) * alpha
+        wanted = ((cam + (aim - cam) * alpha) - cam) / step
+        wanted = _clamp(wanted, -vcap, vcap)
 
-        # Velocity ceiling -- the one rule that keeps this from looking robotic.
-        max_delta = MAX_PAN_PER_SEC * step
-        delta = nxt - cam
-        if abs(delta) > max_delta:
-            nxt = cam + _sign(delta) * max_delta
+        # Acceleration ceiling: reversals ramp instead of snapping.
+        dv = wanted - vel
+        max_dv = MAX_ACCEL_PER_SEC2 * step
+        vel = vel + _sign(dv) * max_dv if abs(dv) > max_dv else wanted
+
+        before = cam - aim
+        nxt = cam + vel * step
+        # Momentum must never carry us past the thing we're aiming at.
+        if before != 0 and _sign(nxt - aim) != _sign(before):
+            nxt = aim
+            vel = 0.0
 
         cam = _clamp(nxt, lo, hi)
         # Round first, then re-clamp: rounding alone can land a hair outside the
@@ -309,18 +380,45 @@ def build_crop_track(
     if not subjects:
         return CropTrack(keyframes=[CropKeyframe(t=0.0, cx=0.5)], is_static=True, coverage=0.0)
 
-    frames = _simulate(subjects, duration, half)
-    values = [f.cx for f in frames]
-    rng = max(values) - min(values)
+    lo = half
+    hi = 1 - half
 
-    if rng < STATIC_RANGE:
-        # Barely moved: one fixed, well-placed crop beats a drifting one.
-        mean = sum(values) / len(values)
+    def fixed(cx: float) -> CropTrack:
         return CropTrack(
-            keyframes=[CropKeyframe(t=0.0, cx=_js_round(mean * 10000) / 10000)],
+            keyframes=[
+                CropKeyframe(
+                    t=0.0,
+                    cx=0.5 if hi <= lo else _clamp(_js_round(cx * 10000) / 10000, lo, hi),
+                )
+            ],
             is_static=True,
             coverage=coverage,
         )
+
+    # Decide "does this shot move?" from where the SUBJECT actually was, never
+    # from what the smoother did. Judging the camera's own output lets detector
+    # dropouts -- which show up as hold/recenter excursions -- masquerade as
+    # subject motion and turn a locked-off shot into a drifting one.
+    xs = sorted(s.cx for s in subjects)
+
+    def at(q: float) -> float:
+        return xs[int(_clamp(_js_round(q * (len(xs) - 1)), 0, len(xs) - 1))]
+
+    spread = at(0.9) - at(0.1)  # percentiles, so one outlier can't fake motion
+    median = at(0.5)
+
+    # A handful of hits across a whole clip is as likely to be a false positive
+    # as a person -- don't hand the framing to it.
+    if coverage < MIN_TRUST_COVERAGE:
+        return fixed(0.5)
+    # Too few detections to have a real motion signal: anything we produced
+    # would be mostly invented, so lock onto the subject's typical position.
+    if coverage < MIN_MOTION_COVERAGE:
+        return fixed(median)
+    if spread < STATIC_RANGE:
+        return fixed(median)
+
+    frames = _simulate(subjects, duration, half)
 
     keyframes = _thin(frames, KEYFRAME_EPSILON)
     # Enforce the cap by relaxing the tolerance until it fits.

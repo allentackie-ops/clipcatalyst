@@ -92,14 +92,21 @@ ok("crop half-width for 9:16 from 16:9", Math.abs(half - 0.1582) < 0.001, `got $
 }
 
 // 6c. A genuinely long absence still releases toward center — but gently.
+//     The subject must MOVE (to clear the static gate) and sit far from center
+//     (so the recenter speed cap actually binds rather than the time constant).
 {
   const s = [];
-  for (let t = 0; t <= 14; t += 0.5) s.push({ t, cx: 0.75, size: 0.2, score: 0.9 });
-  for (let t = 20; t <= 30; t += 0.5) s.push({ t, cx: 0.75, size: 0.2, score: 0.9 });
+  // Walks toward the edge, so at the moment of loss the camera is far from
+  // center and the recenter speed cap genuinely binds.
+  for (let t = 0; t <= 14; t += 0.5) s.push({ t, cx: 0.26 - (t / 14) * 0.09, size: 0.2, score: 0.9 });
+  for (let t = 24; t <= 30; t += 0.5) s.push({ t, cx: 0.17, size: 0.2, score: 0.9 });
   const tr = buildCropTrack(s, { ...OPTS, duration: 30 });
-  let maxV = 0;
-  for (let t = 14; t < 20; t += 0.1) maxV = Math.max(maxV, Math.abs(cropCenterAt(tr, t + 0.1) - cropCenterAt(tr, t)) / 0.1);
-  ok("recenter drift is slower than a real pan", maxV <= 0.036, `maxV=${maxV.toFixed(4)} (cap 0.035)`);
+  ok("long-absence case reaches the motion model", !tr.isStatic, `isStatic=${tr.isStatic}`);
+  // The hold expires at 14+3=17. Measure displacement over the window where the
+  // speed cap actually binds; instantaneous velocity is smoothed away by
+  // keyframe thinning, which is what let this mutation slip through before.
+  const drift = Math.abs(cropCenterAt(tr, 18.5) - cropCenterAt(tr, 17.0));
+  ok("recenter drift is slower than a real pan", drift <= 0.056, `drift over 1.5s=${drift.toFixed(4)} (cap allows 0.0525)`);
 }
 
 // 6d. A stray single detection must never define the whole clip's framing.
@@ -130,6 +137,82 @@ ok("crop half-width for 9:16 from 16:9", Math.abs(half - 0.1582) < 0.001, `got $
   let maxDev = 0;
   for (let t = 0; t <= 20; t += 0.1) maxDev = Math.max(maxDev, Math.abs(cropCenterAt(tr, t) - 0.25));
   ok("single outlier does not fling the frame", maxDev < 0.05, `maxDev=${maxDev.toFixed(4)}`);
+}
+
+// --- Tests that must reach simulate() -------------------------------------
+// The regressions above all use motionless subjects, so the static gate
+// short-circuits before the motion model runs — they pin the gate, not the
+// camera. These use a subject that genuinely moves, so coverage and spread
+// both clear their gates and the constants below are actually exercised.
+// Each was mutation-checked: reverting the constant it names makes it fail.
+
+// 11. HOLD_S — an ordinary dropout shorter than the hold must produce no drift.
+{
+  const s = [];
+  const cxAt = (t) => 0.20 + (t / 20) * 0.12;            // slow real movement
+  for (let t = 0; t <= 20; t += 0.5) {
+    if (t > 10 && t < 12.5) continue;                     // 2.5s dropout
+    s.push({ t, cx: cxAt(t), size: 0.2, score: 0.9 });
+  }
+  const tr = buildCropTrack(s, { ...OPTS, duration: 20 });
+  ok("moving subject clears the static gate", !tr.isStatic, `isStatic=${tr.isStatic}`);
+  const atLoss = cropCenterAt(tr, 10.2);
+  let maxToCenter = 0;
+  for (let t = 10.2; t <= 12.5; t += 0.1) {
+    maxToCenter = Math.max(maxToCenter, cropCenterAt(tr, t) - atLoss); // toward 0.5 = positive
+  }
+  ok("short dropout -> camera does not drift to center", maxToCenter < 0.02, `drift=${maxToCenter.toFixed(4)}`);
+}
+
+// 12. TAIL_HOLD_S — never start a drift the clip has no time to finish.
+{
+  const s = [];
+  for (let t = 0; t <= 15; t += 0.5) s.push({ t, cx: 0.20 + (t / 20) * 0.12, size: 0.2, score: 0.9 });
+  const tr = buildCropTrack(s, { ...OPTS, duration: 20 });
+  let move = 0;
+  const from = cropCenterAt(tr, 19.0);
+  for (let t = 19.0; t <= 20.0; t += 0.05) move = Math.max(move, Math.abs(cropCenterAt(tr, t) - from));
+  ok("no drift begins in the clip's final second", move < 0.005, `moved=${move.toFixed(4)}`);
+}
+
+// 13. MAX_ACCEL_PER_SEC2 — direction changes ramp, never snap. The subject has
+//     to move fast enough to saturate the speed cap, or the reversal is gentle
+//     anyway and the acceleration limit never binds.
+{
+  const s = [];
+  for (let t = 0; t <= 10; t += 0.5) {
+    const cx = t < 5 ? 0.20 + (t / 5) * 0.60 : 0.80 - ((t - 5) / 5) * 0.60;
+    s.push({ t, cx, size: 0.2, score: 0.9 });
+  }
+  const tr = buildCropTrack(s, { ...OPTS, duration: 10 });
+  const v = (t) => (cropCenterAt(tr, t + 0.05) - cropCenterAt(tr, t)) / 0.05;
+  let maxDv = 0;
+  for (let t = 0; t < 9.8; t += 0.1) maxDv = Math.max(maxDv, Math.abs(v(t + 0.1) - v(t)));
+  ok("acceleration is bounded through a reversal", maxDv < 0.07, `max dV/0.1s=${maxDv.toFixed(4)}`);
+}
+
+// 14. JUMP_CONFIRM_SAMPLES — one wild detection mid-pan must not fling the frame.
+{
+  const s = [];
+  for (let t = 0; t <= 20; t += 0.5) {
+    const cx = Math.abs(t - 10) < 0.01 ? 0.88 : 0.25 + (t / 20) * 0.10;
+    s.push({ t, cx, size: 0.2, score: 0.9 });
+  }
+  const tr = buildCropTrack(s, { ...OPTS, duration: 20 });
+  let peak = 0;
+  for (let t = 0; t <= 20; t += 0.05) peak = Math.max(peak, cropCenterAt(tr, t));
+  ok("unconfirmed jump is ignored mid-pan", peak < 0.45, `peak=${peak.toFixed(4)}`);
+}
+
+// 15. MIN_MOTION_COVERAGE — big movement but too few sightings to trust it.
+{
+  const s = [];
+  for (let t = 0; t <= 30; t += 0.5) {
+    if (Math.round(t * 2) % 3 !== 0) continue;             // ~33% hit rate
+    s.push({ t, cx: 0.20 + (t / 30) * 0.55, size: 0.2, score: 0.9 });
+  }
+  const tr = buildCropTrack(s, { ...OPTS, duration: 30 });
+  ok("wide movement but sparse sightings -> locked, not panned", tr.isStatic, `coverage=${tr.coverage.toFixed(2)} keyframes=${tr.keyframes.length}`);
 }
 
 // 7. Two faces: detector flip-flopping must not make the camera ping-pong

@@ -4,6 +4,7 @@
 
 import { cropCenterAt } from "./croptrack";
 import type { CropTrack } from "./croptrack";
+import { SPEAKER_COLORS } from "./diarize";
 import type {
   ClipPlan,
   RenderOptions,
@@ -32,6 +33,17 @@ const MIME_PREFERENCES = [
 
 const BRAND_VIOLET = "#8b5cf6";
 const ACTIVE_WORD_COLOR = "#a78bfa";
+
+/**
+ * Highlight color for the active word: the speaker's palette color when the
+ * word carries a diarized speaker, else exactly the color used before
+ * diarization existed (== SPEAKER_COLORS[0], so speaker 0 is unchanged too).
+ */
+function activeWordColor(word: CaptionWord): string {
+  return word.speaker === undefined
+    ? ACTIVE_WORD_COLOR
+    : SPEAKER_COLORS[word.speaker % SPEAKER_COLORS.length] ?? ACTIVE_WORD_COLOR;
+}
 const CAPTION_MAX_WORDS = 4;
 const CAPTION_MAX_CHARS = 18;
 const PROGRESS_BAR_PX = 4;
@@ -44,7 +56,7 @@ const AUDIO_RESUME_TIMEOUT_MS = 1_500;
 const FONTS_READY_TIMEOUT_MS = 2_000;
 const BACKGROUND_TICK_MS = 250;
 
-type CaptionWord = { text: string; start: number; end: number };
+type CaptionWord = { text: string; start: number; end: number; speaker?: number };
 type CaptionGroup = { words: CaptionWord[]; start: number; end: number };
 type LayoutWord = CaptionWord & { width: number };
 type LayoutLine = { words: LayoutWord[]; width: number };
@@ -62,7 +74,7 @@ function buildCaptionGroups(words: TranscriptWord[]): CaptionGroup[] {
   const cleaned: CaptionWord[] = [];
   for (const w of words) {
     const text = w.text.trim();
-    if (text) cleaned.push({ text, start: w.start, end: w.end });
+    if (text) cleaned.push({ text, start: w.start, end: w.end, speaker: w.speaker });
   }
   const groups: CaptionGroup[] = [];
   let current: CaptionWord[] = [];
@@ -447,7 +459,7 @@ export async function renderClip(
         let x = (width - line.width) / 2;
         const y = stripY + padY + lineHeight * (li + 0.5);
         for (const word of line.words) {
-          ctx.fillStyle = flatIdx === activeIdx ? ACTIVE_WORD_COLOR : "#ffffff";
+          ctx.fillStyle = flatIdx === activeIdx ? activeWordColor(word) : "#ffffff";
           ctx.fillText(word.text, x, y);
           x += word.width + spaceWidth;
           flatIdx++;

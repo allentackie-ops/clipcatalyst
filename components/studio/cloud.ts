@@ -25,6 +25,7 @@ export type JobStatus =
 export type CloudStage =
   | "probe"
   | "transcribe"
+  | "diarize"
   | "analyze"
   | "reframe"
   | "render";

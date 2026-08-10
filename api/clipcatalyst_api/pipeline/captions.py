@@ -8,12 +8,18 @@ highlighted in brand violet #A78BFA at any moment. The highlight is driven by
 active color follows each word's own start time (ASS colors are &HAABBGGRR,
 hence #A78BFA -> &H00FAB8A7&).
 
+Diarized words (word.speaker set) highlight in that speaker's SPEAKER_COLORS
+entry instead; words without a speaker keep the violet above, byte for byte.
+
 Fontname is "Inter"; libass/fontconfig substitutes the default sans-serif
 automatically when Inter is not installed.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from .diarize import SPEAKER_COLORS
 from .types import ClipPlan, Word
 
 CAPTION_MAX_WORDS = 4
@@ -21,6 +27,17 @@ CAPTION_MAX_CHARS = 18
 
 ACTIVE_COLOR = r"\1c&HFAB8A7&"  # #A78BFA in &HBBGGRR
 INACTIVE_COLOR = r"\1c&HFFFFFF&"
+
+
+def _hex_to_ass_color(hex_color: str) -> str:
+    """`#rrggbb` -> an ASS `\\1c&HBBGGRR&` override (ASS is blue-green-red)."""
+    r, g, b = (hex_color[i : i + 2].upper() for i in (1, 3, 5))
+    return rf"\1c&H{b}{g}{r}&"
+
+
+#: Active-word highlight per diarized speaker; index = speaker % len(palette).
+#: Words WITHOUT a speaker keep ACTIVE_COLOR (today's violet) exactly.
+SPEAKER_ACTIVE_COLORS = tuple(_hex_to_ass_color(c) for c in SPEAKER_COLORS)
 
 
 def _timestamp(seconds: float) -> str:
@@ -50,7 +67,7 @@ def group_words(words: list[Word]) -> list[list[Word]]:
     trimmed, empty words dropped, char budget counts single joining spaces).
     """
     cleaned = [
-        Word(text=t, start=w.start, end=w.end)
+        replace(w, text=t)  # keeps start/end AND the diarized speaker index
         for w in words
         if (t := w.text.strip())
     ]
@@ -70,13 +87,23 @@ def group_words(words: list[Word]) -> list[list[Word]]:
     return groups
 
 
+def _active_color(word: Word) -> str:
+    """The highlight color for one word: its speaker's palette entry, or the
+    exact legacy violet when no speaker was diarized (byte-identical output)."""
+    speaker = getattr(word, "speaker", None)
+    if speaker is None:
+        return ACTIVE_COLOR
+    return SPEAKER_ACTIVE_COLORS[int(speaker) % len(SPEAKER_ACTIVE_COLORS)]
+
+
 def _group_text(group: list[Word], group_start: float, group_end: float) -> str:
     """One group's event text: each word carries its highlight transforms."""
     parts: list[str] = []
     for i, w in enumerate(group):
+        active = _active_color(w)
         on_ms = max(0, round((w.start - group_start) * 1000))
-        tags = ACTIVE_COLOR if on_ms == 0 else (
-            INACTIVE_COLOR + rf"\t({on_ms},{on_ms},{ACTIVE_COLOR})"
+        tags = active if on_ms == 0 else (
+            INACTIVE_COLOR + rf"\t({on_ms},{on_ms},{active})"
         )
         if i + 1 < len(group):  # revert to white when the next word takes over
             off_ms = max(on_ms, round((group[i + 1].start - group_start) * 1000))

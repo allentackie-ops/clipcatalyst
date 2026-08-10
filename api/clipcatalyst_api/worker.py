@@ -1,7 +1,7 @@
 """The Celery task that runs the whole pipeline for one job.
 
-probe → transcribe → analyze → reframe → render, mirroring the browser
-Studio's stages.
+probe → transcribe → diarize → analyze → reframe → render, mirroring the
+browser Studio's stages.
 Progress is persisted on the job row (throttled) so `GET /v1/jobs/{id}` can
 stream honest progress. Every failure lands in status=failed with a friendly,
 user-presentable error string.
@@ -9,6 +9,7 @@ user-presentable error string.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import shutil
 import time
@@ -18,16 +19,19 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from . import db
 from .pipeline.croptrack import CropTrack, CropTrackOptions, build_crop_track
+from .pipeline.diarize import assign_speakers, build_speech_segments
 from .pipeline.facetrack import detect_faces
 from .pipeline.highlights import plan_clips
 from .pipeline.probe import probe_media
 from .pipeline.render import render_clip
+from .pipeline.speaker_embed import diarization_enabled, segment_embeddings
 from .pipeline.transcribe import extract_audio_features, get_transcriber
 from .pipeline.types import (
     ClipPlan,
     HighlightOptions,
     PipelineError,
     RenderOptions,
+    Transcript,
 )
 from .queue_app import celery_app
 from .settings import Settings, get_settings
@@ -173,6 +177,21 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         raise PipelineError(_NO_SPEECH_ERROR)
     db.update_job(job_id, stage="transcribe", progress=1.0, detail="Transcript ready")
 
+    # --- diarize (best-effort: any failure keeps words unassigned) -------
+    # CC_DIARIZATION=off skips the stage entirely (no stage row is written,
+    # so progress reads probe → transcribe → analyze exactly as before).
+    if diarization_enabled(settings):
+        db.update_job(
+            job_id, stage="diarize", progress=0.0, detail="Listening for speakers"
+        )
+        transcript, speaker_count = _diarize_transcript(job_id, src, transcript, settings)
+        db.update_job(
+            job_id,
+            stage="diarize",
+            progress=1.0,
+            detail=f"Found {speaker_count} speakers" if speaker_count > 1 else "One speaker",
+        )
+
     # --- analyze ---------------------------------------------------------
     db.update_job(
         job_id, stage="analyze", progress=0.0, detail="Finding the best moments"
@@ -307,6 +326,39 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail=done_detail,
         error=None,
     )
+
+
+def _diarize_transcript(
+    job_id: str, src, transcript: Transcript, settings: Settings
+) -> tuple[Transcript, int]:
+    """Stamp `word.speaker` onto the transcript's words; NEVER raises.
+
+    Diarization is best-effort by contract (SPEAKERS.md): any failure — ffmpeg
+    dying, numpy missing, a numeric surprise — degrades to unassigned words,
+    which the caption builder renders exactly like today's single-voice violet.
+    Returns the (possibly rebuilt) transcript and the speaker count. When only
+    one speaker is heard the transcript is returned untouched, keeping the
+    single-voice render byte-identical to the pre-diarization output.
+    """
+    try:
+        segments = build_speech_segments(transcript.words)
+        embeddings = segment_embeddings(src, segments, settings)
+        result = assign_speakers(transcript.words, segments, embeddings)
+        if result.speaker_count <= 1:
+            return transcript, 1
+        # Word is frozen; plans re-window these words and carry speaker along.
+        words = [
+            dataclasses.replace(w, speaker=s) if s is not None else w
+            for w, s in zip(transcript.words, result.word_speakers)
+        ]
+        return dataclasses.replace(transcript, words=words), result.speaker_count
+    except Exception:
+        logger.warning(
+            "job %s: diarization failed; captions stay single-color",
+            job_id,
+            exc_info=True,
+        )
+        return transcript, 1
 
 
 def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> dict:

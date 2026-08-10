@@ -18,6 +18,11 @@ export default function ClipCard({
   const duration = clip.end - clip.start;
   const format = clip.extension === "mp4" ? "MP4" : "WEBM";
   const filename = `clipcatalyst-${index + 1}.${clip.extension}`;
+  // Distinct diarized speakers in this clip; the badge only appears for a
+  // genuine multi-voice clip (unassigned words don't count).
+  const speakerCount = new Set(
+    clip.words.map((w) => w.speaker).filter((s): s is number => s !== undefined)
+  ).size;
 
   return (
     <Card className="flex h-full flex-col gap-5 p-5">
@@ -46,6 +51,9 @@ export default function ClipCard({
             <Badge tone="neutral" className="font-mono">
               {format}
             </Badge>
+            {speakerCount >= 2 ? (
+              <Badge tone="neutral">{speakerCount} speakers</Badge>
+            ) : null}
             <span className="font-mono text-xs text-zinc-600">
               {formatBytes(clip.blob.size)}
             </span>

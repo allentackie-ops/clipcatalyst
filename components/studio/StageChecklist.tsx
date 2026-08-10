@@ -1,6 +1,6 @@
 "use client";
 
-// Running state: the six-stage pipeline checklist with live progress.
+// Running state: the seven-stage pipeline checklist with live progress.
 
 import { useMemo } from "react";
 import { Button, Card } from "@/components/ui";
@@ -10,6 +10,7 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "read", label: "Read audio" },
   { id: "model", label: "Load AI model" },
   { id: "transcribe", label: "Transcribe" },
+  { id: "diarize", label: "Identify speakers" },
   { id: "analyze", label: "Score moments" },
   { id: "reframe", label: "Reframe on the speaker" },
   { id: "render", label: "Render clips" },
@@ -23,6 +24,7 @@ const STAGE_ANNOUNCEMENTS: Record<StageId, string> = {
   read: "Reading audio",
   model: "Loading AI model",
   transcribe: "Transcribing",
+  diarize: "Identifying speakers",
   analyze: "Scoring moments",
   reframe: "Reframing on the speaker",
   render: "Rendering clips",

@@ -51,6 +51,7 @@ class Settings:
     job_ttl_hours: int = 48  # sources/clips/rows older than this are reaped
     render_timeout_s: int = 900  # hard ceiling on a single ffmpeg render
     face_tracking: str = "on"  # "on" | "off" — reframe on the speaker
+    diarization: str = "on"  # "on" | "off" — color captions per speaker
 
     @property
     def uploads_dir(self) -> Path:
@@ -102,4 +103,5 @@ def get_settings() -> Settings:
         job_ttl_hours=int(os.environ.get("CC_JOB_TTL_HOURS", "48")),
         render_timeout_s=int(os.environ.get("CC_RENDER_TIMEOUT_S", "900")),
         face_tracking=os.environ.get("CC_FACE_TRACKING", "on"),
+        diarization=os.environ.get("CC_DIARIZATION", "on"),
     )

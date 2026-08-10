@@ -727,6 +727,7 @@ def _window_words(words: list[Word], start: float, end: float) -> list[Word]:
                 text=word.text,
                 start=_round3(max(0.0, word.start - start)),
                 end=_round3(max(0.0, min(end, word.end) - start)),
+                speaker=word.speaker,
             )
         )
     return out

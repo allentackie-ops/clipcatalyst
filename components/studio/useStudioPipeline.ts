@@ -1,15 +1,21 @@
 "use client";
 
-// Orchestrates the in-browser clipping pipeline:
-// decode audio → transcribe (worker) → plan highlights → reframe → render clips.
+// Orchestrates the in-browser clipping pipeline: decode audio → transcribe
+// (worker) → diarize speakers → plan highlights → reframe → render clips.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { decodeToMono16k, computeAudioFeatures } from "@/lib/studio/audio";
 import { buildCropTrack } from "@/lib/studio/croptrack";
 import type { CropTrack } from "@/lib/studio/croptrack";
+import { assignSpeakers, buildSpeechSegments } from "@/lib/studio/diarize";
 import { detectFaces } from "@/lib/studio/facetrack";
 import { planClips } from "@/lib/studio/highlights";
 import { renderClip } from "@/lib/studio/render";
+import {
+  computeMfccFrames,
+  segmentEmbeddingsFromFrames,
+} from "@/lib/studio/speakerfeats";
+import type { MfccFrames } from "@/lib/studio/speakerfeats";
 import { MAX_SOURCE_SECONDS, formatDuration } from "./format";
 import type {
   ClipPlan,
@@ -18,6 +24,7 @@ import type {
   PipelineProgress,
   RenderOptions,
   Transcript,
+  TranscriptWord,
   WorkerResponse,
 } from "@/lib/studio/types";
 
@@ -113,6 +120,39 @@ async function trackForClip(
     });
   } catch {
     return undefined; // undefined ⇒ renderClip keeps its centered crop
+  }
+}
+
+/**
+ * Best-effort speaker labels for the transcript, from MFCC frames stashed
+ * before the PCM buffer was transferred away. Any failure (or a single voice
+ * ruling from the shared core) still returns a valid transcript — worst case
+ * every word stays unassigned and captions render exactly like today.
+ */
+function diarizeTranscript(
+  transcript: Transcript,
+  mfcc: MfccFrames | null
+): Transcript {
+  try {
+    if (!mfcc) return transcript;
+    const segments = buildSpeechSegments(transcript.words);
+    const embeddings = segmentEmbeddingsFromFrames(
+      mfcc.frames,
+      mfcc.dims,
+      mfcc.hopSeconds,
+      segments
+    );
+    const { wordSpeakers } = assignSpeakers(transcript.words, segments, embeddings);
+    // Spread copies — never mutate the transcript we were handed (it may be
+    // the caller-owned __CC_TEST_TRANSCRIPT object).
+    return {
+      ...transcript,
+      words: transcript.words.map((w, i) =>
+        wordSpeakers[i] === undefined ? w : { ...w, speaker: wordSpeakers[i] }
+      ),
+    };
+  } catch {
+    return transcript;
   }
 }
 
@@ -216,6 +256,17 @@ export function useStudioPipeline() {
         const features = computeAudioFeatures(pcm, 16000);
         if (abortedRef.current) return;
 
+        // MFCC frames for diarization must be extracted NOW: transcribing
+        // transfers pcm.buffer to the worker, after which the samples are
+        // gone. Best-effort — on failure the run continues without speakers.
+        let mfcc: MfccFrames | null = null;
+        try {
+          mfcc = await computeMfccFrames(pcm);
+        } catch {
+          mfcc = null;
+        }
+        if (abortedRef.current) return;
+
         let transcript: Transcript;
         if (typeof window !== "undefined" && window.__CC_TEST_TRANSCRIPT) {
           transcript = window.__CC_TEST_TRANSCRIPT;
@@ -229,6 +280,11 @@ export function useStudioPipeline() {
             "Couldn't find enough speech to clip. Studio needs spoken audio — music-only videos won't work yet."
           );
         }
+
+        // --- diarize: best-effort speaker labels ---------------------------
+        onProgress({ stage: "diarize", progress: -1, detail: "Listening for speakers" });
+        transcript = diarizeTranscript(transcript, mfcc);
+        if (abortedRef.current) return;
 
         onProgress({ stage: "analyze", progress: -1, detail: "Scoring every moment" });
         const plans = planClips(transcript, features, {

@@ -48,6 +48,7 @@ type CloudRunState =
 const CLOUD_STAGE_IDS: readonly CloudStage[] = [
   "probe",
   "transcribe",
+  "diarize",
   "analyze",
   "reframe",
   "render",
@@ -60,6 +61,7 @@ const CLOUD_CHECKLIST: { id: CloudChecklistStage; label: string }[] = [
   { id: "queued", label: "Queue" },
   { id: "probe", label: "Probe video" },
   { id: "transcribe", label: "Transcribe" },
+  { id: "diarize", label: "Identify speakers" },
   { id: "analyze", label: "Score moments" },
   { id: "reframe", label: "Reframe on the speaker" },
   { id: "render", label: "Render clips" },

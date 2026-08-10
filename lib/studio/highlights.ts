@@ -678,6 +678,8 @@ function windowWords(
       text: word.text,
       start: round3(Math.max(0, word.start - start)),
       end: round3(Math.max(0, Math.min(end, word.end) - start)),
+      // Diarized speaker rides along — the caption renderer colors by it.
+      ...(word.speaker !== undefined ? { speaker: word.speaker } : {}),
     });
   }
   return out;

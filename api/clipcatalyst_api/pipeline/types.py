@@ -15,6 +15,7 @@ class Word:
     text: str  # includes leading space where the ASR provides one
     start: float
     end: float
+    speaker: int | None = None  # diarized speaker index (0 = most speech); None = unknown
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,11 @@ ProgressFn = "callable[[StageProgress], None]"  # documentation alias
 def rebase_words(words: list[Word], start: float) -> list[Word]:
     """Words inside a window, re-based so captions start at 0."""
     return [
-        Word(text=w.text, start=max(0.0, w.start - start), end=max(0.0, w.end - start))
+        Word(
+            text=w.text,
+            start=max(0.0, w.start - start),
+            end=max(0.0, w.end - start),
+            speaker=w.speaker,
+        )
         for w in words
     ]

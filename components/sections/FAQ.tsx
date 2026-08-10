@@ -3,7 +3,7 @@ import { Container, SectionHeading } from "@/components/ui";
 const faqs: { q: string; a: string }[] = [
   {
     q: "How is 90-second processing actually possible?",
-    a: "We run the whole pipeline — transcription, scoring, reframing, captioning — on optimized GPU clusters in parallel, not one stage at a time. Intelligent caching means repeat runs on the same footage are even faster. Median time from upload to first finished clip: under 90 seconds, versus 10–20 minutes for OpusClip or Klap.",
+    a: "The cloud pipeline runs all seven layers — transcription, scoring, reframing, captioning — on optimized GPU clusters in parallel, not one stage at a time; that's what early access unlocks. Intelligent caching means repeat runs on the same footage are even faster. Median target from upload to first finished clip: under 90 seconds, versus 10–20 minutes for OpusClip or Klap.",
   },
   {
     q: "How accurate is the clip selection?",
@@ -26,6 +26,10 @@ const faqs: { q: string; a: string }[] = [
     a: "One-click publish to TikTok, YouTube Shorts, and Instagram Reels, with platform-specific optimization applied per destination. You can also schedule posts, download files up to 4K, or share a review link with your team before anything goes live.",
   },
   {
+    q: "What can the free Studio beta do right now?",
+    a: "Studio runs Whisper AI and the virality engine entirely in your browser — your video never leaves your device. Give it a talking video (15 minutes or less works best) and it cuts 9:16 captioned clips, each scored 0–100. The 90-second cloud pipeline that chews through hour-long podcasts is what the waitlist unlocks.",
+  },
+  {
     q: "Who owns my footage?",
     a: "You do — always. Source video is never shared or resold, and finished clips inform the virality model only in aggregate, with a one-click opt-out. Delete a project and it is gone from our servers.",
   },
@@ -38,7 +42,7 @@ export default function FAQ() {
         <SectionHeading
           eyebrow="Questions"
           title="Straight answers, no fine print"
-          lede="The seven things creators ask before their first upload."
+          lede="The eight things creators ask before their first upload."
         />
         <div className="mx-auto mt-14 max-w-3xl divide-y divide-line rounded-2xl border border-line bg-ink-900/40">
           {faqs.map((faq) => (

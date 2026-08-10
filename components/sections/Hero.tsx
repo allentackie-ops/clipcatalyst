@@ -65,20 +65,15 @@ export default function Hero() {
               <Button href="#waitlist" size="lg">
                 Get early access
               </Button>
-              <Button href="/demo" variant="secondary" size="lg">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden
-                  className="text-brand-400"
-                >
-                  <path d="M8 5.5v13l11-6.5-11-6.5Z" />
-                </svg>
-                Try the live demo
+              <Button href="/studio" variant="secondary" size="lg">
+                Clip a video free &rarr;
               </Button>
             </div>
+
+            <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-500">
+              Free = Studio beta &mdash; runs entirely in your browser, no
+              upload. The 90-second cloud pipeline arrives with early access.
+            </p>
 
             {/* Stat strip */}
             <div className="mt-12 grid max-w-xl grid-cols-2 gap-x-6 gap-y-8 border-t border-line pt-8 sm:grid-cols-4">

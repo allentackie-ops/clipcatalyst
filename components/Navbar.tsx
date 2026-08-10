@@ -9,7 +9,8 @@ const links = [
   { href: "#features", label: "Features" },
   { href: "#pricing", label: "Pricing" },
   { href: "#compare", label: "Compare" },
-  { href: "/demo", label: "Live demo" },
+  { href: "/studio", label: "Studio" },
+  { href: "/demo", label: "Product tour" },
 ];
 
 export default function Navbar() {

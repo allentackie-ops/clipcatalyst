@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { CLIPS } from "./data";
 import ClipCard, { ProcessingCard } from "./ClipCard";
 import DetailPanel from "./DetailPanel";
@@ -61,7 +62,15 @@ export default function DemoApp() {
             <IconInfo className="h-4 w-4 shrink-0 text-brand-300" />
             <p className="flex-1 text-xs leading-relaxed text-brand-300 sm:text-[13px]">
               <span className="font-semibold text-white">Demo mode</span> —
-              you’re viewing a sample project. Uploads are disabled.
+              you’re viewing a sample project. Uploads are disabled. This is
+              the guided tour — the real engine lives in{" "}
+              <Link
+                href="/studio"
+                className="text-brand-300 underline underline-offset-2 transition hover:text-white"
+              >
+                Studio
+              </Link>
+              .
             </p>
             <button
               type="button"

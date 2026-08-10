@@ -9,7 +9,8 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
       { label: "Chat editing", href: "#chat-editing" },
       { label: "Features", href: "#features" },
       { label: "Pricing", href: "#pricing" },
-      { label: "Live demo", href: "/demo" },
+      { label: "Studio (beta)", href: "/studio" },
+      { label: "Product tour", href: "/demo" },
     ],
   },
   {

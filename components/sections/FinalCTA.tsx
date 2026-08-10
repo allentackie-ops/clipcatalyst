@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { Button, Container, Eyebrow } from "@/components/ui";
 
 function WaitlistForm() {
@@ -90,6 +91,14 @@ export default function FinalCTA() {
             <WaitlistForm />
             <p className="mt-6 font-mono text-xs tracking-wide text-zinc-500">
               Free tier at launch · No credit card · First clip in 90 seconds
+            </p>
+            <p className="mt-4 text-sm">
+              <Link
+                href="/studio"
+                className="text-brand-300 transition-colors hover:text-white"
+              >
+                Can&rsquo;t wait? Try the Studio beta now &rarr;
+              </Link>
             </p>
           </div>
         </div>

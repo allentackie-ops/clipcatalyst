@@ -106,7 +106,7 @@ export default function Speed() {
               Done in <GradientText>90 seconds</GradientText>. Not 20 minutes.
             </>
           }
-          lede="Median time from upload to finished clip: under 90 seconds. The competition is still drawing a progress bar."
+          lede="Median time from upload to finished clip at launch: under 90 seconds. The competition is still drawing a progress bar."
         />
 
         {/* Comparison chart */}
@@ -180,7 +180,7 @@ export default function Speed() {
           </div>
 
           <p className="mt-6 font-mono text-xs text-zinc-400 sm:mt-4">
-            Median processing time · 1080p source · 10 clips per batch
+            Target median · cloud pipeline · 1080p source · 10 clips per batch
           </p>
         </Card>
 

@@ -120,7 +120,7 @@ export default function Problem() {
                 With ClipCatalyst
               </h3>
               <Badge tone="signal">
-                <span className="font-mono">&lt;90s</span> / clip
+                <span className="font-mono">&lt;90s</span> / clip · at launch
               </Badge>
             </div>
             <ul className="relative mt-6 space-y-4">

@@ -1,7 +1,10 @@
 // Behavioural tests for the browser speaker-feature extractor: synthetic PCM
 // in pure JS (no ffmpeg) through frames → segment embeddings → the shared
 // assignSpeakers core. Mirrors the discrimination properties the Python
-// engine proves on its side.
+// engine proves on its side, including the two adversarial-review fixtures:
+// one voice shifting register (laugh/shout) must stay ONE speaker, and two
+// similar same-mic voices merge by design (the documented conservative
+// direction).
 import {
   computeMfccFrames,
   segmentEmbeddingsFromFrames,
@@ -24,24 +27,88 @@ const TURN_S = 4;
 const PAUSE_S = 1;
 const AMP = 0.35;
 
-/** Voice A: sawtooth at 110 Hz. */
-function sawtooth(out, offset, seconds, freq = 110) {
+/**
+ * Voice A — the SPEAKERS.md recipe voice: sawtooth ~110 Hz through a ~900 Hz
+ * lowpass (two cascaded one-poles ≈ ffmpeg's 2nd-order `lowpass=f=900`). The
+ * vocal-tract tilt matters: an UNFILTERED 110 Hz comb is spectrally flat over
+ * 300–3000 Hz and would (rightly) trip the speech-likeness gate.
+ */
+function voiceA(out, offset, seconds) {
   const n = Math.round(seconds * SR);
-  const period = SR / freq;
+  const period = SR / 110;
+  const a = Math.exp((-2 * Math.PI * 900) / SR);
+  let y1 = 0, y2 = 0;
   for (let i = 0; i < n; i++) {
     const phase = (i % period) / period;
-    out[offset + i] = AMP * (2 * phase - 1);
+    const s = AMP * (2 * phase - 1);
+    y1 = (1 - a) * s + a * y1;
+    y2 = (1 - a) * y1 + a * y2;
+    out[offset + i] = y2;
   }
 }
 
-/** Voice B: square wave at 280 Hz. */
-function square(out, offset, seconds, freq = 280) {
+/** Voice B — square ~280 Hz through a ~400 Hz one-pole highpass (recipe). */
+function voiceB(out, offset, seconds) {
   const n = Math.round(seconds * SR);
-  const period = SR / freq;
+  const period = SR / 280;
+  const a = Math.exp((-2 * Math.PI * 400) / SR);
+  let lp = 0;
   for (let i = 0; i < n; i++) {
     const phase = (i % period) / period;
-    out[offset + i] = phase < 0.5 ? AMP : -AMP;
+    const s = phase < 0.5 ? AMP : -AMP;
+    lp = (1 - a) * s + a * lp;
+    out[offset + i] = s - lp;
   }
+}
+
+/**
+ * The SAME person shifting register — a laugh/shout burst: raised-F0
+ * harmonics swamped by broadband noise, pre-emphasized for a brighter tilt.
+ * Seeded 32-bit LCG so every run builds the identical burst (determinism).
+ */
+function excited(out, offset, seconds) {
+  const n = Math.round(seconds * SR);
+  const period = SR / 160;
+  let seed = 0xbeef1234 >>> 0;
+  let prev = 0;
+  for (let i = 0; i < n; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const noise = (seed / 4294967296) * 2 - 1;
+    const phase = (i % period) / period;
+    const raw = 0.28 * (2 * phase - 1) + 0.22 * noise;
+    out[offset + i] = raw - 0.7 * prev; // pre-emphasis: brighter tilt
+    prev = raw;
+  }
+}
+
+/**
+ * Same excitation (110 Hz harmonic series, 1/k glottal rolloff), vocal-tract
+ * formants at (800, 1200)·scale. Two of these ~8% apart imitate the axis real
+ * same-mic voices actually differ on — and measure only ~0.01 cosine apart in
+ * mean+std MFCC space, far under CLUSTER_TAU.
+ */
+function formantVoice(formantScale) {
+  const F0 = 110;
+  const partials = [];
+  let peak = 0;
+  for (let k = 1; k * F0 < 3200; k++) {
+    const f = k * F0;
+    let g = 0;
+    for (const [fc, bw] of [[800 * formantScale, 120], [1200 * formantScale, 150]]) {
+      g += 1 / (1 + ((f - fc) / bw) ** 2);
+    }
+    g /= k;
+    partials.push([(2 * Math.PI * f) / SR, g]);
+    peak += g;
+  }
+  return (out, offset, seconds) => {
+    const n = Math.round(seconds * SR);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (const [w, g] of partials) s += g * Math.sin(w * i);
+      out[offset + i] = (0.5 * s) / peak;
+    }
+  };
 }
 
 /**
@@ -82,9 +149,10 @@ const cosineDist = (a, b) => {
 };
 
 // 1. Two distinct voices alternating → two speakers with alternating turns.
+//    (The speech-likeness gate must NOT kill true detection.)
 {
   const { result: r, embeddings } = await diarizeConversation([
-    sawtooth, square, sawtooth, square, sawtooth, square,
+    voiceA, voiceB, voiceA, voiceB, voiceA, voiceB,
   ]);
   ok("two voices -> speakerCount 2", r.speakerCount === 2, `got ${r.speakerCount}`);
   ok(
@@ -112,7 +180,7 @@ const cosineDist = (a, b) => {
 // 2. One voice all the way through → one speaker (false-split guard holds).
 {
   const { result: r } = await diarizeConversation([
-    sawtooth, sawtooth, sawtooth, sawtooth, sawtooth, sawtooth,
+    voiceA, voiceA, voiceA, voiceA, voiceA, voiceA,
   ]);
   ok("one voice -> speakerCount 1", r.speakerCount === 1, `got ${r.speakerCount}`);
   ok("one voice -> every word speaker 0", r.wordSpeakers.every((s) => s === 0));
@@ -121,7 +189,7 @@ const cosineDist = (a, b) => {
 // 3. Silence-only segment → empty embedding; a voiced one stays usable.
 {
   const pcm = new Float32Array(6 * SR); // silence...
-  sawtooth(pcm, 4 * SR, 2); // ...except the last 2 s
+  voiceA(pcm, 4 * SR, 2); // ...except the last 2 s
   const mfcc = await computeMfccFrames(pcm);
   const segs = [
     { start: 0.5, end: 3.0, wordIdxs: [0] }, // pure silence
@@ -151,8 +219,8 @@ const cosineDist = (a, b) => {
 
 // 5. Determinism: identical PCM → identical embeddings and assignment.
 {
-  const a = await diarizeConversation([sawtooth, square, sawtooth, square]);
-  const b = await diarizeConversation([sawtooth, square, sawtooth, square]);
+  const a = await diarizeConversation([voiceA, voiceB, voiceA, voiceB]);
+  const b = await diarizeConversation([voiceA, voiceB, voiceA, voiceB]);
   ok(
     "deterministic embeddings",
     JSON.stringify(a.embeddings) === JSON.stringify(b.embeddings)
@@ -160,6 +228,47 @@ const cosineDist = (a, b) => {
   ok(
     "deterministic assignment",
     JSON.stringify(a.result) === JSON.stringify(b.result)
+  );
+}
+
+// 6. THE HEADLINE FINDING: one voice shifting register — normal turns
+//    alternating with laugh/shout turns — must NOT split into two speakers.
+//    Without the frame-level speech-likeness gate this exact construction
+//    split at ~0.97 confidence: the noise-excited turns sit ≥0.49 cosine from
+//    the same voice's normal speech in a TIGHT second cloud the width-ratio
+//    separation guard cannot catch.
+{
+  const { result: r, embeddings } = await diarizeConversation([
+    voiceA, excited, voiceA, excited, voiceA, excited,
+  ]);
+  ok("style shift -> speakerCount 1", r.speakerCount === 1, `got ${r.speakerCount}`);
+  ok("style shift -> every word speaker 0", r.wordSpeakers.every((s) => s === 0));
+  ok(
+    "laugh-like turns embed empty (gated at the frame level)",
+    embeddings[1].length === 0 && embeddings[3].length === 0 && embeddings[5].length === 0,
+    `lens=${embeddings.map((e) => e.length)}`
+  );
+}
+
+// 7. KNOWN LIMITATION (documented, deliberate): two same-channel voices that
+//    differ only by ~8% formant placement — the axis genuinely similar
+//    same-mic voices differ on — measure well under CLUSTER_TAU and merge.
+//    The feature reports ONE speaker rather than risk painting one person as
+//    two; if the recipe ever grows a real identity axis, this test will fail
+//    and should then be flipped to assert speakerCount 2.
+{
+  const va = formantVoice(1.0);
+  const vb = formantVoice(1.08);
+  const { result: r, embeddings } = await diarizeConversation([va, vb, va, vb, va, vb]);
+  ok(
+    "similar voices embed non-empty (the merge is a judgement, not a gate)",
+    embeddings.every((e) => e.length === 24),
+    `lens=${embeddings.map((e) => e.length)}`
+  );
+  ok(
+    "similar same-mic voices -> ONE speaker today (conservative by design)",
+    r.speakerCount === 1,
+    `got ${r.speakerCount}`
   );
 }
 

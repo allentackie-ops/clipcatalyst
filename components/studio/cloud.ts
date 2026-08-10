@@ -58,6 +58,11 @@ export type CloudClip = {
   url: string;
   width: number;
   height: number;
+  /**
+   * Distinct diarized speakers in the clip (server-computed; 0 = diarization
+   * off/failed or one voice). Optional so older servers still parse.
+   */
+  speaker_count?: number;
 };
 
 export type CloudJob = {
@@ -230,6 +235,12 @@ export async function pollJob(
 }
 
 /**
+ * FinishedClip plus the server-computed speaker count. Cloud clips carry no
+ * words, so ClipCard can't derive the count locally — the server reports it.
+ */
+export type CloudFinishedClip = FinishedClip & { speakerCount?: number };
+
+/**
  * Map server clips into the FinishedClip shape ClipCard renders: absolute
  * url, mp4 container, duration via end - start. The server never reports
  * file size, so `blob` is a size-only stand-in — ClipCard reads nothing but
@@ -238,7 +249,7 @@ export async function pollJob(
 export function toFinishedClips(
   base: string,
   clips: CloudClip[]
-): FinishedClip[] {
+): CloudFinishedClip[] {
   return clips.map((clip) => ({
     id: clip.id,
     start: clip.start,
@@ -253,5 +264,6 @@ export function toFinishedClips(
     mimeType: "video/mp4",
     extension: "mp4",
     blob: { size: Number.NaN } as unknown as Blob,
+    speakerCount: clip.speaker_count,
   }));
 }

@@ -9,6 +9,12 @@ shared judgement core (`pipeline.diarize`, the port of diarize.ts) the
 two-voice fixture must come out as exactly two speakers with alternating
 turns, while a single-voice fixture must stay one speaker.
 
+Two adversarial-review fixtures ride along: one voice alternating normal and
+excited (laugh/shout) turns must stay ONE speaker — the speech-likeness gate
+at the frame level is what prevents the false split — and two same-channel
+voices differing only by ~8% formant placement merge by design (the
+documented merge-by-default direction).
+
 Degradation matters as much as detection: silent or off-the-end segments must
 embed as `[]`, CC_DIARIZATION=off must short-circuit before ffmpeg is even
 consulted, and only ffmpeg itself failing may raise — a bad diarization day
@@ -24,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from clipcatalyst_api.pipeline import speaker_embed as speaker_embed_module
 from clipcatalyst_api.pipeline.diarize import (
     SpeechSegment,
     assign_speakers,
@@ -47,6 +54,37 @@ VOICE_A_SRC = "aevalsrc='0.5*(2*(110*t-floor(0.5+110*t)))'"  # sawtooth ~110 Hz
 VOICE_A_FILTER = "lowpass=f=900"
 VOICE_B_SRC = "aevalsrc='0.4*(2*gt(sin(2*PI*280*t),0)-1)'"  # square ~280 Hz
 VOICE_B_FILTER = "highpass=f=400"
+
+#: The SAME voice shifting register — a laugh/shout burst: raised-F0
+#: harmonics swamped by broadband noise, brightened. This is the adversarial
+#: review's headline construction: in mean+std MFCC space it lands FAR from
+#: the voice's normal speech yet forms a TIGHT second cloud, the exact false
+#: "2 speakers at ~0.94 confidence" the speech-likeness gate now prevents.
+EXCITED_SRC = "aevalsrc='0.28*(2*(160*t-floor(0.5+160*t))) + 0.22*(2*random(0)-1)'"
+EXCITED_FILTER = "highpass=f=300,treble=g=8"  # brighter tilt
+
+
+def formant_voice_src(formant_scale: float) -> str:
+    """Same excitation, different vocal tract — the honest identity axis.
+
+    A 110 Hz harmonic series with 1/k glottal rolloff, shaped by two formant
+    resonances at (800, 1200)*scale Hz. Two of these ~8% apart imitate what
+    genuinely similar same-mic voices differ by — and land ~0.01 cosine apart
+    in mean+std MFCC space, far under the clustering threshold.
+    """
+    partials: list[tuple[float, float]] = []
+    k = 1
+    while k * 110.0 < 3200.0:
+        f = k * 110.0
+        gain = sum(
+            1.0 / (1.0 + ((f - fc) / bw) ** 2)
+            for fc, bw in ((800.0 * formant_scale, 120.0), (1200.0 * formant_scale, 150.0))
+        ) / k
+        partials.append((f, gain))
+        k += 1
+    peak = sum(g for _, g in partials)
+    series = "+".join(f"{g / peak:.6f}*sin(2*PI*{f:g}*t)" for f, g in partials)
+    return f"aevalsrc='0.5*({series})'"
 
 
 @pytest.fixture()
@@ -117,6 +155,25 @@ def two_voice_wav(tmp_path_factory, ffmpeg_bin: str, pieces) -> Path:
 @pytest.fixture(scope="module")
 def single_voice_wav(tmp_path_factory, ffmpeg_bin: str, pieces) -> Path:
     return alternating(ffmpeg_bin, tmp_path_factory.mktemp("mix"), pieces, "AAAA")
+
+
+@pytest.fixture(scope="module")
+def style_shift_wav(tmp_path_factory, ffmpeg_bin: str, pieces) -> Path:
+    """One voice alternating normal turns with excited (laugh/shout) turns."""
+    d = tmp_path_factory.mktemp("style")
+    voices = dict(pieces)
+    voices["E"] = synth(ffmpeg_bin, d / "excited.wav", EXCITED_SRC, EXCITED_FILTER, TURN_S)
+    return alternating(ffmpeg_bin, d, voices, "AEAEAE")
+
+
+@pytest.fixture(scope="module")
+def similar_voices_wav(tmp_path_factory, ffmpeg_bin: str, pieces) -> Path:
+    """Two same-channel voices differing only by ~8% formant placement."""
+    d = tmp_path_factory.mktemp("similar")
+    voices = dict(pieces)
+    voices["X"] = synth(ffmpeg_bin, d / "voiceX.wav", formant_voice_src(1.0), "anull", TURN_S)
+    voices["Y"] = synth(ffmpeg_bin, d / "voiceY.wav", formant_voice_src(1.08), "anull", TURN_S)
+    return alternating(ffmpeg_bin, d, voices, "XYXYXY")
 
 
 def turn_transcript(turn_count: int) -> list[Word]:
@@ -228,6 +285,77 @@ def test_a_single_voice_stays_one_speaker(single_voice_wav: Path, settings) -> N
 
     assert result.speaker_count == 1
     assert result.confidence == 0
+    assert all(s == 0 for s in result.word_speakers)
+
+
+def test_one_voice_shifting_register_stays_one_speaker(
+    style_shift_wav: Path, settings
+) -> None:
+    """THE HEADLINE FINDING: a laugh/shout must not mint a phantom speaker.
+
+    One voice alternating normal and excited turns used to split into "2
+    speakers" at ~0.94 confidence: the noise-excited turns land 0.49+ cosine
+    from the same voice's normal speech in a TIGHT second cloud the
+    width-ratio separation guard cannot catch. The speech-likeness gate drops
+    those frames instead, the laugh-like turns embed empty, and the shared
+    core lets them inherit their neighbour's speaker.
+    """
+    words = turn_transcript(6)
+    segments = build_speech_segments(words)
+    embeddings = segment_embeddings(style_shift_wav, segments, settings)
+
+    # The mechanism: excited turns keep no speech-like frames at all.
+    assert [len(e) for e in embeddings] == [24, 0, 24, 0, 24, 0]
+
+    result = assign_speakers(words, segments, embeddings)
+
+    assert result.speaker_count == 1
+    assert all(s == 0 for s in result.word_speakers)
+
+
+def test_without_the_gate_the_style_shift_reproduces_the_false_split(
+    style_shift_wav: Path, settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Meta-test: the fixture genuinely reproduces the bug the gate fixes.
+
+    With the flatness gate disarmed, the same audio splits into two
+    high-confidence speakers — so the assertion above is not vacuously
+    passing, and the gate is the load-bearing part of the fix.
+    """
+    monkeypatch.setattr(speaker_embed_module, "SPEECH_FLATNESS_MAX", 1.0)
+    words = turn_transcript(6)
+    segments = build_speech_segments(words)
+    embeddings = segment_embeddings(style_shift_wav, segments, settings)
+
+    result = assign_speakers(words, segments, embeddings)
+
+    assert result.speaker_count == 2
+    assert result.confidence > 0.9
+
+
+def test_similar_same_mic_voices_stay_one_speaker_for_now(
+    similar_voices_wav: Path, settings
+) -> None:
+    """KNOWN LIMITATION (documented, deliberate): merge-by-default.
+
+    Two voices with the same excitation and formants ~8% apart — the axis
+    genuinely similar same-mic voices differ on — measure far under the
+    clustering threshold, so the feature reports ONE speaker rather than risk
+    painting one person as two. If the recipe ever grows a real identity
+    axis, this test will fail; flip it to assert speaker_count == 2 then.
+    """
+    words = turn_transcript(6)
+    segments = build_speech_segments(words)
+    embeddings = segment_embeddings(similar_voices_wav, segments, settings)
+
+    # The merge is a judgement between real fingerprints, not a gate artefact.
+    assert all(len(e) == 24 for e in embeddings)
+    across = [cosine_distance(x, y) for x in embeddings[0::2] for y in embeddings[1::2]]
+    assert max(across) < 0.35, "fixture drift: voices no longer 'similar'"
+
+    result = assign_speakers(words, segments, embeddings)
+
+    assert result.speaker_count == 1
     assert all(s == 0 for s in result.word_speakers)
 
 

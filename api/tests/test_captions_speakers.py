@@ -91,7 +91,10 @@ class TestSpeakerColors:
         assert AMBER_1 in speaker1_event
         assert VIOLET_0 not in speaker1_event
         # The legacy unassigned violet appears nowhere: every word has a speaker.
-        assert ACTIVE_COLOR not in ass
+        # Speaker 0's violet IS the legacy active color — the spec's promise
+        # ("speaker 0 keeps the exact violet"). They were only distinct while
+        # the legacy constant carried a transposed-byte bug.
+        assert VIOLET_0 == ACTIVE_COLOR
         # Inactive words still revert to white.
         assert INACTIVE_COLOR in speaker0_event
         assert INACTIVE_COLOR in speaker1_event
@@ -113,7 +116,7 @@ class TestSpeakerColors:
         line = event_for(ass, "three")
         blocks = TAG_BLOCK.findall(line)
         assert len(blocks) == 4
-        assert VIOLET_0 in blocks[0] and ACTIVE_COLOR not in blocks[0]
+        assert VIOLET_0 in blocks[0]
         assert ACTIVE_COLOR in blocks[1]
         assert AMBER_1 in blocks[2]
         assert ROSE_3 in blocks[3]
@@ -135,9 +138,11 @@ class TestSpeakerColors:
 
 # --- the byte-identical regression ------------------------------------------
 
-# Captured from the PREVIOUS build_ass (no Word.speaker, no diarization) on
-# no_speaker_words() with height=960, watermark=True. Do not regenerate with
-# the current code -- the point is comparing against the old builder's bytes.
+# Captured from the pre-diarization build_ass on no_speaker_words()
+# (height=960, watermark=True), then DELIBERATELY updated once: the original
+# capture carried a transposed-byte violet (&HFAB8A7& — periwinkle, not brand
+# violet). The golden now holds the corrected &HFA8BA7& so it guards both the
+# no-speaker structure AND the right color. Do not regenerate casually.
 GOLDEN_NO_SPEAKERS = r"""[Script Info]
 ; ClipCatalyst karaoke captions
 ScriptType: v4.00+
@@ -149,14 +154,14 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,Inter,40,&H00FFFFFF,&H00FAB8A7,&H73000000,&H73000000,-1,0,0,0,100,100,0,0,4,17,0,2,17,17,226,1
+Style: Caption,Inter,40,&H00FFFFFF,&H00FA8BA7,&H73000000,&H73000000,-1,0,0,0,100,100,0,0,4,17,0,2,17,17,226,1
 Style: Watermark,Inter,20,&H73FFFFFF,&H73FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,3,19,19,19,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Text
-Dialogue: 0,0:00:00.20,0:00:01.70,Caption,,0,0,0,{\1c&HFAB8A7&\t(500,500,\1c&HFFFFFF&)}Hello {\1c&HFFFFFF&\t(500,500,\1c&HFAB8A7&)\t(1100,1100,\1c&HFFFFFF&)}world {\1c&HFFFFFF&\t(1100,1100,\1c&HFAB8A7&)}this
-Dialogue: 0,0:00:01.80,0:00:03.00,Caption,,0,0,0,{\1c&HFAB8A7&\t(300,300,\1c&HFFFFFF&)}is {\1c&HFFFFFF&\t(300,300,\1c&HFAB8A7&)\t(500,500,\1c&HFFFFFF&)}a {\1c&HFFFFFF&\t(500,500,\1c&HFAB8A7&)}karaoke
-Dialogue: 0,0:00:03.10,0:00:05.60,Caption,,0,0,0,{\1c&HFAB8A7&\t(800,800,\1c&HFFFFFF&)}caption {\1c&HFFFFFF&\t(800,800,\1c&HFAB8A7&)\t(1900,1900,\1c&HFFFFFF&)}test {\1c&HFFFFFF&\t(1900,1900,\1c&HFAB8A7&)}strip
+Dialogue: 0,0:00:00.20,0:00:01.70,Caption,,0,0,0,{\1c&HFA8BA7&\t(500,500,\1c&HFFFFFF&)}Hello {\1c&HFFFFFF&\t(500,500,\1c&HFA8BA7&)\t(1100,1100,\1c&HFFFFFF&)}world {\1c&HFFFFFF&\t(1100,1100,\1c&HFA8BA7&)}this
+Dialogue: 0,0:00:01.80,0:00:03.00,Caption,,0,0,0,{\1c&HFA8BA7&\t(300,300,\1c&HFFFFFF&)}is {\1c&HFFFFFF&\t(300,300,\1c&HFA8BA7&)\t(500,500,\1c&HFFFFFF&)}a {\1c&HFFFFFF&\t(500,500,\1c&HFA8BA7&)}karaoke
+Dialogue: 0,0:00:03.10,0:00:05.60,Caption,,0,0,0,{\1c&HFA8BA7&\t(800,800,\1c&HFFFFFF&)}caption {\1c&HFFFFFF&\t(800,800,\1c&HFA8BA7&)\t(1900,1900,\1c&HFFFFFF&)}test {\1c&HFFFFFF&\t(1900,1900,\1c&HFA8BA7&)}strip
 Dialogue: 1,0:00:00.00,0:00:10.00,Watermark,,0,0,0,ClipCatalyst
 """
 

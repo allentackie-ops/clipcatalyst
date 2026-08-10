@@ -50,6 +50,9 @@ class ClipOut(BaseModel):
     url: str
     width: int
     height: int
+    # Distinct diarized speakers in the clip's words; 0 = diarization off,
+    # failed, or a single voice (browser parity: badge shows only at >= 2).
+    speaker_count: int = 0
 
 
 class JobStatusResponse(BaseModel):

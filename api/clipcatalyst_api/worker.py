@@ -376,6 +376,9 @@ def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> 
         "url": url,
         "width": width,
         "height": height,
+        # Distinct diarized speakers heard in this clip; 0 when diarization
+        # was off, failed, or heard a single voice (words stay unassigned).
+        "speaker_count": len({w.speaker for w in plan.words if w.speaker is not None}),
     }
 
 

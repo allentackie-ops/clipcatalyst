@@ -6,7 +6,7 @@ semi-transparent box around 72% of frame height, with exactly one active word
 highlighted in brand violet #A78BFA at any moment. The highlight is driven by
 `\\t` override-tag transforms inside a single Dialogue event per group, so the
 active color follows each word's own start time (ASS colors are &HAABBGGRR,
-hence #A78BFA -> &H00FAB8A7&).
+hence #A78BFA -> &H00FA8BA7&).
 
 Diarized words (word.speaker set) highlight in that speaker's SPEAKER_COLORS
 entry instead; words without a speaker keep the violet above, byte for byte.
@@ -25,7 +25,7 @@ from .types import ClipPlan, Word
 CAPTION_MAX_WORDS = 4
 CAPTION_MAX_CHARS = 18
 
-ACTIVE_COLOR = r"\1c&HFAB8A7&"  # #A78BFA in &HBBGGRR
+ACTIVE_COLOR = r"\1c&HFA8BA7&"  # #A78BFA in &HBBGGRR
 INACTIVE_COLOR = r"\1c&HFFFFFF&"
 
 
@@ -139,7 +139,7 @@ def build_ass(plan: ClipPlan, height: int, watermark: bool) -> str:
         "Alignment, MarginL, MarginR, MarginV, Encoding",
         # BorderStyle=4: libass background box in BackColour (subtle, 55% black);
         # inactive words white, bold, Inter with automatic sans fallback.
-        f"Style: Caption,Inter,{font_size},&H00FFFFFF,&H00FAB8A7,"
+        f"Style: Caption,Inter,{font_size},&H00FFFFFF,&H00FA8BA7,"
         f"&H73000000,&H73000000,-1,0,0,0,100,100,0,0,4,{pad},0,"
         f"2,{pad},{pad},{margin_v},1",
         # Watermark: small, ~55% alpha white, bottom-right.

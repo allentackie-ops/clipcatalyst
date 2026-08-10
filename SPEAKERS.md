@@ -37,9 +37,20 @@ Per speech segment (from `buildSpeechSegments`, capped at the first 4 s):
    (floor 1e-10).
 5. DCT-II, keep coefficients c1..c12 (drop c0 — energy is mic distance, not
    identity).
-6. Skip near-silent frames (frame RMS < 0.008); if fewer than 5 voiced
-   frames remain, return an EMPTY embedding (the shared core treats it as
-   unusable and the segment inherits a neighbour).
+6. Skip near-silent frames (frame RMS < 0.008) AND non-speech-like frames:
+   per-frame spectral flatness over the ~300–3000 Hz band (FFT bins 10–96
+   inclusive; geometric mean / arithmetic mean of the power-spectrum bins,
+   geometric mean in log domain with the same 1e-10 floor) must be ≤ 0.16.
+   The threshold sits in a measured gap: vocal-tract-shaped harmonic series
+   (F0 80–350 Hz, formant/tilt shaping) measure 0.001–0.14; laughter/breath
+   frames (noise bursts, aspirated onsets, noise-dominant mixes) measure
+   0.18–0.75. Without this gate, one voice shifting register — a laugh, a
+   shout — falsely split into "2 speakers" at ~0.94 confidence: the
+   noise-excited frames land 0.49–0.80 cosine from the same voice's normal
+   speech in a TIGHT second cloud the width-ratio separation guard cannot
+   catch, so the filtering must happen at the frame level. If fewer than 5
+   frames survive both gates, return an EMPTY embedding (the shared core
+   treats it as unusable and the segment inherits a neighbour).
 7. Embedding = [mean(c1..c12), std(c1..c12)] → 24 dims, L2-normalized.
 
 Exact numeric parity across languages is NOT required (numpy FFT vs JS FFT
@@ -48,9 +59,27 @@ voices instead. The CLUSTERING layer is bit-exact and cross-checked.
 
 Synthetic voice recipe for tests (works — validated for the fixtures): voice A
 = sawtooth ~110 Hz through a lowpass around 900 Hz; voice B = square ~280 Hz
-highpassed around 400 Hz (ffmpeg `aevalsrc`/`sine`+filters). Alternate them in
-3–5 s turns with 1 s silences. The embeddings must cluster A-segments with
-A-segments (cosine), and a single-voice fixture must yield speakerCount 1.
+highpassed around 400 Hz (ffmpeg `aevalsrc`/`sine`+filters; deterministic
+sample loops on the JS side — the lowpass on voice A is REQUIRED there too, an
+unfiltered comb trips the flatness gate). Alternate them in 3–5 s turns with
+1 s silences. The embeddings must cluster A-segments with A-segments (cosine),
+and a single-voice fixture must yield speakerCount 1. Two more fixtures guard
+the adversarial findings in BOTH suites: a style-shift fixture (voice A
+alternating with raised-F0 + broadband-noise + brighter-tilt "excited" turns)
+must come out speakerCount 1 — the excited turns embed empty because the gate
+drops their frames — and an identity-axis fixture (two same-channel voices,
+same 110 Hz excitation, formants ~8% apart) asserts speakerCount 1 as an
+EXPLICIT known limitation, so the tests speak up if the recipe ever improves.
+
+### What to expect on real audio
+
+The feature detects speakers reliably when voices differ substantially in
+timbre or channel — a phone-in guest, different mics, host + remote caller.
+On genuinely similar same-mic voices it is deliberately conservative:
+measured same-channel voice pairs often sit only 0.05–0.14 cosine apart —
+under the 0.35 clustering threshold — so the feature usually reports one
+speaker there. That direction is by design (merge-by-default): it reports
+one speaker rather than risk painting one person as two.
 
 ## Modules
 

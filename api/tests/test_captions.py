@@ -7,7 +7,7 @@ import re
 from clipcatalyst_api.pipeline.captions import build_ass, group_words
 from clipcatalyst_api.pipeline.types import ClipPlan, Word
 
-ACTIVE = r"\1c&HFAB8A7&"
+ACTIVE = r"\1c&HFA8BA7&"
 INACTIVE = r"\1c&HFFFFFF&"
 TIMESTAMP = r"\d+:\d{2}:\d{2}\.\d{2}"
 TAG_BLOCK = re.compile(r"\{[^}]*\}")

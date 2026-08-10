@@ -12,17 +12,23 @@ export default function ClipCard({
   clip,
   index,
 }: {
-  clip: FinishedClip;
+  /** Cloud clips carry a server-computed speakerCount (their words are []). */
+  clip: FinishedClip & { speakerCount?: number };
   index: number;
 }) {
   const duration = clip.end - clip.start;
   const format = clip.extension === "mp4" ? "MP4" : "WEBM";
   const filename = `clipcatalyst-${index + 1}.${clip.extension}`;
   // Distinct diarized speakers in this clip; the badge only appears for a
-  // genuine multi-voice clip (unassigned words don't count).
-  const speakerCount = new Set(
-    clip.words.map((w) => w.speaker).filter((s): s is number => s !== undefined)
-  ).size;
+  // genuine multi-voice clip (unassigned words don't count). Prefer the
+  // server-reported count when present, else derive it from the words.
+  const speakerCount =
+    clip.speakerCount ??
+    new Set(
+      clip.words
+        .map((w) => w.speaker)
+        .filter((s): s is number => s !== undefined)
+    ).size;
 
   return (
     <Card className="flex h-full flex-col gap-5 p-5">

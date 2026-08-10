@@ -193,6 +193,10 @@ def test_full_flow_renders_real_portrait_clips(client, test_video: Path, tmp_pat
         assert clip["url"].startswith(f"/v1/files/{job_id}/")
         assert clip["width"] == 540  # 9:16 of the requested 960 height
         assert clip["height"] == 960
+        # Per-clip diarized speaker count is always present; the single-voice
+        # (sine-tone) fixture must never claim a multi-speaker clip.
+        assert isinstance(clip["speaker_count"], int)
+        assert 0 <= clip["speaker_count"] <= 1
 
     # Download the first clip through the files route.
     resp = client.get(clips[0]["url"])

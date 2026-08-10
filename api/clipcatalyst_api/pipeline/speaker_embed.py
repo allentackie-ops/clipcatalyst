@@ -11,7 +11,9 @@ SPEAKERS.md fixes for both engines:
   4. 24 triangular mel filters spanning 80-7600 Hz; log energies (floor 1e-10).
   5. DCT-II, keep coefficients c1..c12 (drop c0 -- energy is mic distance,
      not identity).
-  6. Skip near-silent frames (frame RMS < 0.008); fewer than 5 voiced frames
+  6. Skip near-silent frames (frame RMS < 0.008) AND non-speech-like frames
+     (spectral flatness of the ~300-3000 Hz power-spectrum band > 0.16 --
+     laughter, breath, shouty roughness); fewer than 5 surviving frames
      -> EMPTY embedding (the shared core lets that segment inherit a
      neighbour's speaker).
   7. Embedding = [mean(c1..c12), std(c1..c12)] -> 24 dims, L2-normalized.
@@ -61,7 +63,28 @@ MEL_HIGH_HZ = 7600.0
 LOG_FLOOR = 1e-10
 #: Frames quieter than this RMS carry no voice worth fingerprinting.
 VOICED_RMS = 0.008
-#: Fewer voiced frames than this -> the segment is unusable, embed as [].
+#: Speech-likeness gate band (~300-3000 Hz) as inclusive FFT-bin indices.
+FLATNESS_LO_BIN = 10  # ceil(300 * FFT_SIZE / SAMPLE_RATE)
+FLATNESS_HI_BIN = 96  # floor(3000 * FFT_SIZE / SAMPLE_RATE)
+#: Frames whose 300-3000 Hz spectral flatness (geometric mean / arithmetic
+#: mean of the power-spectrum bins; geometric mean in log domain with the
+#: LOG_FLOOR) exceeds this are not speech-like -- laughter, breath, shouty
+#: roughness -- and may not enter the embedding. A register shift is exactly
+#: what falsely split one voice into "2 speakers": its noise-excited frames
+#: form a TIGHT second cloud 0.49-0.80 cosine away from the same voice's
+#: normal speech, which the width-ratio separation guard cannot catch, so the
+#: filter has to happen at the frame level.
+#:
+#: Placed empirically through this exact window/FFT:
+#:   speech-like: vocal-tract-shaped harmonic series, F0 80-350 Hz with
+#:     formant/tilt shaping, incl. both fixture voices -> flatness 0.001-0.14
+#:   laughter/breath-like: white-noise bursts, band noise, aspirated onsets,
+#:     noise-dominant harmonic+noise mixes            -> flatness 0.18-0.75
+#: 0.16 sits in the measured gap. Normal speech loses at most its fricative
+#: frames; a laugh loses every frame and the segment embeds empty (so the
+#: shared core lets it inherit a neighbour instead of minting a speaker).
+SPEECH_FLATNESS_MAX = 0.16
+#: Fewer speech-like voiced frames than this -> segment unusable, embed as [].
 MIN_VOICED_FRAMES = 5
 #: DCT-II coefficients kept: c1..c12 (c0 dropped -- loudness, not identity).
 FIRST_COEFF, LAST_COEFF = 1, 12
@@ -293,6 +316,17 @@ def _embed(pcm, np) -> list[float]:
 
         window, filterbank, dct_rows = _analysis_tables()
         spectra = np.abs(np.fft.rfft(frames * window, n=FFT_SIZE, axis=1))
+
+        # Speech-likeness gate: spectral flatness of the ~300-3000 Hz band
+        # (see SPEECH_FLATNESS_MAX). Laughter/breath frames measure flat and
+        # are dropped so a register shift cannot mint a phantom speaker.
+        power = spectra[:, FLATNESS_LO_BIN : FLATNESS_HI_BIN + 1] ** 2
+        geo_mean = np.exp(np.mean(np.log(np.maximum(power, LOG_FLOOR)), axis=1))
+        arith_mean = np.maximum(np.mean(power, axis=1), LOG_FLOOR)
+        spectra = spectra[geo_mean / arith_mean <= SPEECH_FLATNESS_MAX]
+        if spectra.shape[0] < MIN_VOICED_FRAMES:
+            return []
+
         mel = spectra @ filterbank.T
         logmel = np.log(np.maximum(mel, LOG_FLOOR))
         cepstra = logmel @ dct_rows.T  # (frames, 12): c1..c12 per frame

@@ -5,6 +5,8 @@ export type TranscriptWord = {
   text: string; // includes leading space where whisper provides one
   start: number;
   end: number;
+  /** Diarized speaker index (0 = most speech time). Absent = unknown. */
+  speaker?: number;
 };
 
 export type Transcript = {
@@ -72,6 +74,7 @@ export type StageId =
   | "read"
   | "model"
   | "transcribe"
+  | "diarize"
   | "analyze"
   | "reframe"
   | "render"

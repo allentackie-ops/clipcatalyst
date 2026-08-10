@@ -283,8 +283,10 @@ export default function ResultsView({
       </div>
 
       <p className="mt-10 text-center font-mono text-xs text-zinc-500">
-        Exports include the beta watermark · MP4 vs WebM depends on your
-        browser
+        {renderOptions.watermark
+          ? "Exports include the beta watermark · "
+          : ""}
+        MP4 vs WebM depends on your browser
       </p>
 
       {editorIndex !== null ? (

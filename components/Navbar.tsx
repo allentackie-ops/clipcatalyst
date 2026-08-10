@@ -4,13 +4,17 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button, Container, Logo } from "@/components/ui";
 
+// Section anchors are root-relative ("/#pricing", not "#pricing") because the
+// bar also sits on /account, where those sections don't exist — from there the
+// link has to go home first.
 const links = [
-  { href: "#virality-engine", label: "Virality Engine" },
-  { href: "#features", label: "Features" },
-  { href: "#pricing", label: "Pricing" },
-  { href: "#compare", label: "Compare" },
+  { href: "/#virality-engine", label: "Virality Engine" },
+  { href: "/#features", label: "Features" },
+  { href: "/#pricing", label: "Pricing" },
+  { href: "/#compare", label: "Compare" },
   { href: "/studio", label: "Studio" },
   { href: "/demo", label: "Product tour" },
+  { href: "/account", label: "Account" },
 ];
 
 export default function Navbar() {
@@ -34,7 +38,7 @@ export default function Navbar() {
           ))}
         </nav>
         <div className="flex items-center gap-3">
-          <Button href="#waitlist">Get early access</Button>
+          <Button href="/#waitlist">Get early access</Button>
           <button
             type="button"
             aria-label="Open menu"

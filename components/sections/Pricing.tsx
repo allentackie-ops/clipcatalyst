@@ -1,4 +1,5 @@
 import { Badge, Button, Card, Container, SectionHeading } from "@/components/ui";
+import { cloudEnabled } from "@/components/studio/cloud";
 
 type Tier = {
   name: string;
@@ -10,6 +11,14 @@ type Tier = {
   limitations?: string[];
   cta: string;
   href: string;
+  /**
+   * CTA for builds where accounts are live (NEXT_PUBLIC_CLOUD_API set): the
+   * button opens /account, and the paid tiers deep-link straight into that
+   * plan's checkout. Omitted (Enterprise) → the waitlist CTA stands, and with
+   * the API unset every tier keeps today's waitlist CTA exactly.
+   */
+  liveCta?: string;
+  liveHref?: string;
   highlight?: boolean;
 };
 
@@ -22,6 +31,8 @@ const tiers: Tier[] = [
     limitations: ["720p export, watermarked"],
     cta: "Get early access",
     href: "#waitlist",
+    liveCta: "Start free",
+    liveHref: "/account",
   },
   {
     name: "Starter",
@@ -36,6 +47,8 @@ const tiers: Tier[] = [
     ],
     cta: "Reserve Starter",
     href: "#waitlist",
+    liveCta: "Get Starter",
+    liveHref: "/account?plan=starter",
   },
   {
     name: "Pro",
@@ -51,6 +64,8 @@ const tiers: Tier[] = [
     ],
     cta: "Reserve Pro",
     href: "#waitlist",
+    liveCta: "Get Pro",
+    liveHref: "/account?plan=pro",
     highlight: true,
   },
   {
@@ -113,6 +128,11 @@ function DashIcon() {
 }
 
 function TierBody({ tier }: { tier: Tier }) {
+  // cloudEnabled is a build-time constant: with NEXT_PUBLIC_CLOUD_API unset
+  // these collapse to tier.cta/tier.href, so the rendered markup of today's
+  // public build is unchanged.
+  const cta = cloudEnabled && tier.liveCta ? tier.liveCta : tier.cta;
+  const href = cloudEnabled && tier.liveHref ? tier.liveHref : tier.href;
   return (
     <div className="flex h-full flex-col p-6 lg:p-7">
       <div className="flex items-center justify-between gap-2">
@@ -160,11 +180,11 @@ function TierBody({ tier }: { tier: Tier }) {
 
       <div className="mt-auto pt-8">
         <Button
-          href={tier.href}
+          href={href}
           variant={tier.highlight ? "primary" : "secondary"}
           className="w-full"
         >
-          {tier.cta}
+          {cta}
         </Button>
       </div>
     </div>

@@ -8,6 +8,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, Container, Eyebrow, Logo } from "@/components/ui";
+import { useAccount } from "@/components/account/AccountProvider";
 import { useStudioPipeline } from "./useStudioPipeline";
 import StudioDropzone from "./StudioDropzone";
 import StageChecklist from "./StageChecklist";
@@ -29,9 +30,9 @@ import {
   startJob,
   toFinishedClips,
   uploadSource,
+  type CloudFinishedClip,
   type CloudStage,
 } from "./cloud";
-import type { FinishedClip } from "@/lib/studio/types";
 
 // ---- Cloud beta (only reachable when NEXT_PUBLIC_CLOUD_API is set) ----
 
@@ -43,7 +44,7 @@ type CloudRunState =
   | { status: "uploading"; progress: number }
   | { status: "queued" }
   | { status: "processing"; stage: CloudStage; progress: number; detail: string }
-  | { status: "done"; clips: FinishedClip[] }
+  | { status: "done"; clips: CloudFinishedClip[] }
   | { status: "error"; message: string };
 
 const CLOUD_STAGE_IDS: readonly CloudStage[] = [
@@ -440,6 +441,16 @@ function CloudChecklist({
 
 export default function StudioApp() {
   const { state, run, reset } = useStudioPipeline();
+  const { user, loading: accountLoading } = useAccount();
+
+  // Entitlements are the server's (/v1/me reports the EFFECTIVE plan, so a
+  // canceled subscription is already free). Signed out, still loading, or on
+  // Free → watermark, exactly today's behaviour. Device renders run on the
+  // user's own hardware, so this is soft client-side enforcement — the
+  // honest boundary is documented in STUDIO.md; cloud renders are decided
+  // server-side from the same entitlements.
+  const watermarkRequired =
+    accountLoading || user === null || user.entitlements.watermark_required;
 
   // Lifted settings survive reset() — the user's choices stick between runs.
   const [settings, setSettings] = useState<StudioUISettings>(DEFAULT_SETTINGS);
@@ -459,13 +470,29 @@ export default function StudioApp() {
     status: "idle",
   });
   const cloudAbortRef = useRef<AbortController | null>(null);
+  // Object URLs minted by toFinishedClips for a signed-in user's clips (the
+  // files are fetched with the session bearer). We own them — revoke on the
+  // next run, on cancel, and on unmount, or the blobs leak.
+  const cloudObjectUrlsRef = useRef<string[]>([]);
+
+  const revokeCloudObjectUrls = useCallback(() => {
+    for (const url of cloudObjectUrlsRef.current) URL.revokeObjectURL(url);
+    cloudObjectUrlsRef.current = [];
+  }, []);
 
   // Leaving the page mid-run: kill the upload and the 1.5 s poll loop.
-  useEffect(() => () => cloudAbortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      cloudAbortRef.current?.abort();
+      for (const url of cloudObjectUrlsRef.current) URL.revokeObjectURL(url);
+    },
+    []
+  );
 
   const runCloud = useCallback(
     async (picked: File) => {
       cloudAbortRef.current?.abort();
+      revokeCloudObjectUrls();
       const controller = new AbortController();
       cloudAbortRef.current = controller;
       // Every setState checks the signal so an aborted run can't repaint.
@@ -516,10 +543,17 @@ export default function StudioApp() {
             job.error || "The cloud job failed. Try again in a minute."
           );
         }
-        safeSet({
-          status: "done",
-          clips: toFinishedClips(CLOUD_API, job.clips),
-        });
+        const finished = await toFinishedClips(
+          CLOUD_API,
+          job.clips,
+          controller.signal
+        );
+        if (controller.signal.aborted) {
+          for (const url of finished.objectUrls) URL.revokeObjectURL(url);
+          return;
+        }
+        cloudObjectUrlsRef.current = finished.objectUrls;
+        safeSet({ status: "done", clips: finished.clips });
       } catch (e) {
         if (controller.signal.aborted) return;
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -532,14 +566,15 @@ export default function StudioApp() {
         });
       }
     },
-    [settings]
+    [settings, revokeCloudObjectUrls]
   );
 
   const handleCloudCancel = useCallback(() => {
     cloudAbortRef.current?.abort();
     cloudAbortRef.current = null;
+    revokeCloudObjectUrls();
     setCloudState({ status: "idle" });
-  }, []);
+  }, [revokeCloudObjectUrls]);
 
   // Feature-detect instead of crashing mid-pipeline on Safari/mobile gaps.
   useEffect(() => {
@@ -621,9 +656,8 @@ export default function StudioApp() {
       void runCloud(file);
       return;
     }
-    // Free tier: watermark always on.
-    void run(file, { ...settings, watermark: true });
-  }, [file, settings, run, engine, runCloud]);
+    void run(file, { ...settings, watermark: watermarkRequired });
+  }, [file, settings, run, engine, runCloud, watermarkRequired]);
 
   const handleReset = useCallback(() => {
     handleCloudCancel();
@@ -724,8 +758,8 @@ export default function StudioApp() {
               </div>
 
               <p className="mt-10 text-center font-mono text-xs text-zinc-500">
-                Rendered on your ClipCatalyst server · MP4 · includes the beta
-                watermark
+                Rendered on your ClipCatalyst server · MP4
+                {watermarkRequired ? " · includes the beta watermark" : ""}
               </p>
             </div>
           ) : cloudState.status === "error" ? (

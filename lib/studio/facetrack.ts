@@ -49,7 +49,13 @@ export type FaceTrackPlan = Pick<ClipPlan, "start" | "end">;
 
 type FaceApiBox = { x: number; y: number; width: number; height: number };
 type FaceApiDetection = { box?: FaceApiBox; score?: number };
+type FaceApiTf = {
+  setBackend: (name: string) => PromiseLike<boolean>;
+  ready: () => PromiseLike<void>;
+  getBackend?: () => string;
+};
 type FaceApiModule = {
+  tf?: FaceApiTf;
   nets: { tinyFaceDetector: { loadFromUri: (uri: string) => Promise<void> } };
   TinyFaceDetectorOptions: new (options: {
     inputSize?: number;
@@ -87,6 +93,30 @@ function modelUri(): string {
 }
 
 /**
+ * Pick a TensorFlow backend we can actually run.
+ *
+ * Left to itself, TF.js prefers `wasm` over `cpu` — but its wasm binaries are
+ * fetched separately and we deliberately don't ship them, so on a machine
+ * without WebGL it 404s and leaves the engine wedged rather than falling
+ * through. Naming the two backends we DO have keeps face tracking working on
+ * WebGL-less devices (slower, via cpu) instead of silently switching itself
+ * off. Failure here is non-fatal: detection still degrades to a centered crop.
+ */
+async function selectBackend(tf: FaceApiTf | undefined): Promise<void> {
+  if (!tf?.setBackend) return;
+  for (const name of ["webgl", "cpu"]) {
+    try {
+      if (await tf.setBackend(name)) {
+        await tf.ready();
+        return;
+      }
+    } catch {
+      // Try the next one.
+    }
+  }
+}
+
+/**
  * Lazily import face-api and load the weights, memoized for the session.
  *
  * A failure is memoized too: if the weights 404 on the first clip there is no
@@ -101,6 +131,7 @@ function loadFaceApi(): Promise<FaceApiModule | null> {
       // The literal specifier is kept so the bundler can code-split it.
       // @ts-ignore -- optional dependency; typed as FaceApiModule above.
       const mod = (await import("@vladmandic/face-api")) as unknown as FaceApiModule;
+      await selectBackend(mod.tf);
       await mod.nets.tinyFaceDetector.loadFromUri(modelUri());
       return mod;
     })().catch((error: unknown) => {

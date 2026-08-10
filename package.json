@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:croptrack": "tsc lib/studio/croptrack.ts --target es2020 --module es2020 --moduleResolution bundler --outDir .croptrack-build --strict && node scripts/croptrack.test.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

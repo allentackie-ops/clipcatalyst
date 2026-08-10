@@ -50,12 +50,46 @@ const MIN_SCORE = 0.45;
 const DEADBAND = 0.018;
 /** Ceiling on camera speed (fraction of width per second) — glide, not snap. */
 const MAX_PAN_PER_SEC = 0.14;
+/** Ceiling on how fast the camera may change speed — kills re-acquisition jerk. */
+const MAX_ACCEL_PER_SEC2 = 0.5;
 /** Exponential smoothing time constant, seconds. Higher = lazier camera. */
 const SMOOTH_TAU = 0.55;
-/** Keep the last known position this long after losing the face. */
-const HOLD_S = 1.2;
+/**
+ * Keep the last known position this long after losing the face.
+ *
+ * Detectors miss frames constantly on real footage — a head turn, a glance at
+ * notes, a hand near the chin. At a 2 Hz sample rate this must span several
+ * consecutive misses, or an ordinary dropout drags the camera off a subject
+ * who never moved.
+ */
+const HOLD_S = 3.0;
 /** After HOLD_S with no face, ease back to center over this long. */
-const RECENTER_TAU = 2.0;
+const RECENTER_TAU = 6.0;
+/**
+ * Recentering is a shrug, not a move: it happens when we've lost the subject,
+ * so it must never look as purposeful as following one.
+ */
+const RECENTER_MAX_PAN_PER_SEC = MAX_PAN_PER_SEC / 4;
+/** Never start drifting this close to the end — the last frame is the loop point. */
+const TAIL_HOLD_S = 1.5;
+/**
+ * A target step beyond this is a cut, not a movement — people don't teleport.
+ * Gliding across it leaves the new speaker outside the frame for seconds.
+ */
+const JUMP_FACTOR = 1.0; // × crop half-width
+/** Consecutive agreeing detections before we accept a jump (2 = 1s at 2 Hz). */
+const JUMP_CONFIRM_SAMPLES = 2;
+/**
+ * Below this hit rate there is no motion signal worth following — whatever
+ * `simulate` produced would be mostly invented. Lock the frame instead.
+ */
+const MIN_MOTION_COVERAGE = 0.4;
+/**
+ * And below THIS, we never really saw a face at all: a couple of hits across a
+ * whole clip is indistinguishable from a false positive, and betting the entire
+ * framing on it is worse than not reframing. Fall back to center.
+ */
+const MIN_TRUST_COVERAGE = 0.15;
 /** A new face must be this much larger to steal focus from the current one. */
 const SUBJECT_SWITCH_RATIO = 1.45;
 /** ...and must stay larger for this long, so two speakers don't ping-pong. */
@@ -150,9 +184,13 @@ function pickSubjects(byTime: Map<number, FaceSample[]>): FaceSample[] {
 /**
  * Walk a fixed timeline, easing the camera toward the subject.
  *
- * Three behaviours stack: a deadband so micro-movement never moves the frame,
- * exponential smoothing so motion is gradual, and a hard velocity cap so the
- * camera can never lurch. When the face is lost we hold, then drift to center.
+ * Behaviours stack, in order of how much they matter to the eye: a deadband so
+ * micro-movement never moves the frame, exponential smoothing so motion is
+ * gradual, a velocity cap so the camera can never lurch, and an acceleration
+ * cap so it can never change direction instantly. Two escapes from that model:
+ * a step too large to be human is a cut and is taken instantly, and a subject
+ * lost for a long time is released slowly toward center rather than held or
+ * snapped.
  */
 function simulate(
   subjects: FaceSample[],
@@ -167,19 +205,45 @@ function simulate(
 
   const step = 1 / 15; // simulate at 15 Hz; keyframes are thinned afterwards
   const frames: CropKeyframe[] = [];
+  const jumpThreshold = half * JUMP_FACTOR;
 
   let cam = subjects.length > 0 ? clamp(subjects[0].cx, lo, hi) : center;
   let target = cam;
+  let vel = 0;
   let idx = 0;
   let lastSeen = subjects.length > 0 ? subjects[0].t : -Infinity;
+  let pendingCx: number | null = null;
+  let pendingCount = 0;
 
   for (let t = 0; t <= duration + 1e-9; t += step) {
     // Advance to the most recent detection at or before t.
     while (idx < subjects.length && subjects[idx].t <= t) {
       const s = subjects[idx];
       const desired = clamp(s.cx, lo, hi);
-      // Deadband: only re-aim when the subject has genuinely moved.
-      if (Math.abs(desired - target) > DEADBAND) target = desired;
+
+      if (Math.abs(desired - target) > jumpThreshold) {
+        // Too far to be movement — probably a cut. Demand corroboration
+        // before believing it, so one stray detection can't fling the frame.
+        if (pendingCx !== null && Math.abs(desired - pendingCx) <= jumpThreshold) {
+          pendingCount++;
+        } else {
+          pendingCx = desired;
+          pendingCount = 1;
+        }
+        if (pendingCount >= JUMP_CONFIRM_SAMPLES) {
+          target = desired;
+          cam = desired; // cut, not a pan: arrive immediately
+          vel = 0;
+          pendingCx = null;
+          pendingCount = 0;
+        }
+      } else {
+        pendingCx = null;
+        pendingCount = 0;
+        // Deadband: only re-aim when the subject has genuinely moved.
+        if (Math.abs(desired - target) > DEADBAND) target = desired;
+      }
+
       lastSeen = s.t;
       idx++;
     }
@@ -187,19 +251,31 @@ function simulate(
     const gap = t - lastSeen;
     let aim = target;
     let tau = SMOOTH_TAU;
-    if (gap > HOLD_S) {
-      // Face lost for a while: give up gracefully rather than freeze forever.
+    let vcap = MAX_PAN_PER_SEC;
+    // Don't begin a drift we can't finish: a clip ending mid-move looks broken,
+    // and the last frame is what loops on TikTok and Reels.
+    if (gap > HOLD_S && t < duration - TAIL_HOLD_S) {
       aim = center;
       tau = RECENTER_TAU;
+      vcap = RECENTER_MAX_PAN_PER_SEC;
     }
 
     const alpha = 1 - Math.exp(-step / tau);
-    let next = cam + (aim - cam) * alpha;
+    let wanted = ((cam + (aim - cam) * alpha) - cam) / step;
+    wanted = clamp(wanted, -vcap, vcap);
 
-    // Velocity ceiling — the one rule that keeps this from looking robotic.
-    const maxDelta = MAX_PAN_PER_SEC * step;
-    const delta = next - cam;
-    if (Math.abs(delta) > maxDelta) next = cam + Math.sign(delta) * maxDelta;
+    // Acceleration ceiling: reversals ramp instead of snapping.
+    const dv = wanted - vel;
+    const maxDv = MAX_ACCEL_PER_SEC2 * step;
+    vel = Math.abs(dv) > maxDv ? vel + Math.sign(dv) * maxDv : wanted;
+
+    const before = cam - aim;
+    let next = cam + vel * step;
+    // Momentum must never carry us past the thing we're aiming at.
+    if (before !== 0 && Math.sign(next - aim) !== Math.sign(before)) {
+      next = aim;
+      vel = 0;
+    }
 
     cam = clamp(next, lo, hi);
     // Round first, then re-clamp: rounding alone can land a hair outside the
@@ -266,19 +342,34 @@ export function buildCropTrack(
     return { keyframes: [{ t: 0, cx: 0.5 }], isStatic: true, coverage: 0 };
   }
 
-  const frames = simulate(subjects, duration, half);
-  const values = frames.map((f) => f.cx);
-  const range = Math.max(...values) - Math.min(...values);
+  const lo = half;
+  const hi = 1 - half;
+  const fixed = (cx: number): CropTrack => ({
+    keyframes: [
+      { t: 0, cx: hi <= lo ? 0.5 : clamp(Math.round(cx * 10000) / 10000, lo, hi) },
+    ],
+    isStatic: true,
+    coverage,
+  });
 
-  if (range < STATIC_RANGE) {
-    // Barely moved: one fixed, well-placed crop beats a drifting one.
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    return {
-      keyframes: [{ t: 0, cx: Math.round(mean * 10000) / 10000 }],
-      isStatic: true,
-      coverage,
-    };
-  }
+  // Decide "does this shot move?" from where the SUBJECT actually was, never
+  // from what the smoother did. Judging the camera's own output lets detector
+  // dropouts — which show up as hold/recenter excursions — masquerade as
+  // subject motion and turn a locked-off shot into a drifting one.
+  const xs = subjects.map((s) => s.cx).sort((a, b) => a - b);
+  const at = (q: number) => xs[clamp(Math.round(q * (xs.length - 1)), 0, xs.length - 1)];
+  const spread = at(0.9) - at(0.1); // percentiles, so one outlier can't fake motion
+  const median = at(0.5);
+
+  // A handful of hits across a whole clip is as likely to be a false positive
+  // as a person — don't hand the framing to it.
+  if (coverage < MIN_TRUST_COVERAGE) return fixed(0.5);
+  // Too few detections to have a real motion signal: anything we produced
+  // would be mostly invented, so lock onto the subject's typical position.
+  if (coverage < MIN_MOTION_COVERAGE) return fixed(median);
+  if (spread < STATIC_RANGE) return fixed(median);
+
+  const frames = simulate(subjects, duration, half);
 
   let keyframes = thin(frames, KEYFRAME_EPSILON);
   // Enforce the cap by relaxing the tolerance until it fits.

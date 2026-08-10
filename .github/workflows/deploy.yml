@@ -30,6 +30,11 @@ jobs:
       - run: npm run build
         env:
           GITHUB_PAGES: "true"
+          # Repository variable CLOUD_API (Settings → Secrets and variables →
+          # Actions → Variables). Unset = empty = cloud engine stays hidden and
+          # the site builds exactly as it does today. Set it to the API's
+          # public origin to light up cloud clipping, accounts, and billing.
+          NEXT_PUBLIC_CLOUD_API: ${{ vars.CLOUD_API }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./out

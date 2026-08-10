@@ -169,7 +169,24 @@ When set, the mutating routes — `POST /v1/jobs`, `PUT /v1/uploads/{id}`,
 `POST /v1/jobs/{id}/start`, and `GET /v1/files/...` — require
 `Authorization: Bearer <token>` (compared in constant time). `GET /v1/jobs/{id}`
 and `GET /v1/healthz` stay open so status polling and health checks keep
-working. Copy `.env.example → .env` for the full, documented variable list.
+working. Setting it also switches off the interactive docs (`/docs`, `/redoc`,
+`/openapi.json`), which exist to help you explore a dev box, not to enumerate
+a public one. Copy `.env.example → .env` for the full, documented variable list.
+
+**Selling plans requires this token.** With `CC_BILLING` set to anything but
+`off`, the API refuses to start while `CC_API_TOKEN` is empty, and says so:
+
+```
+RuntimeError: CC_BILLING='stripe' but CC_API_TOKEN is empty. With no founder
+token the job routes stay open to anonymous callers, ...
+```
+
+That is not pedantry. An empty token leaves the job routes open to callers
+with no session, and a caller with no session has no account: no plan, so no
+height clamp (4K for anyone) and no monthly quota (renders nobody is billed
+for). Every entitlement the pricing page promises becomes optional, and the
+paying customers are the only ones subject to it. Set the token, or run
+`CC_BILLING=off` — the dev default, where every account is free-tier anyway.
 
 ### 7.2 Put TLS + rate limiting in front
 
@@ -185,7 +202,11 @@ reverse proxy:
       rate_limit @api {
           zone api { key {remote_host}; events 60; window 1m }
       }
-      reverse_proxy localhost:8000
+      reverse_proxy localhost:8000 {
+          # Overwrite, don't append: the API reads the LEFTMOST entry, and a
+          # header the client wrote must never survive into it.
+          header_up X-Forwarded-For {remote_host}
+      }
   }
   ```
 
@@ -195,6 +216,41 @@ reverse proxy:
 Then set `CC_PUBLIC_BASE_URL=https://your-box.example.com` so clip URLs come
 back absolute. Rate limiting matters because uploads and renders are expensive —
 one script hammering `POST /v1/jobs` can fill your disk or GPU queue.
+
+#### Tell the API who the proxy is
+
+Once a proxy is in front, every request arrives from the *proxy's* address.
+Nothing downstream can tell two callers apart unless you say which peer is
+allowed to speak for them:
+
+```
+CC_TRUSTED_PROXIES=172.18.0.2        # ips or CIDR blocks, comma-separated
+```
+
+With that set, the API's own auth rate limiter (10/min on register, login and
+checkout) keys on the leftmost `X-Forwarded-For` entry — but **only** when the
+connection came from one of those addresses. Everything else keys on the peer.
+The default is empty, meaning trust nobody: that is deliberate, because a
+forwarded header is client-written, and believing one unconditionally does not
+just weaken the limiter, it removes it (an attacker rotates the header per
+attempt and is never counted twice).
+
+Leaving it unset behind a proxy has the opposite failure: every client shares
+one bucket, so a single attacker at a trickle can 429 login and signup for
+*everyone*. Set it, and configure the proxy to overwrite `X-Forwarded-For`
+(the Caddy `header_up` above) — a proxy that appends leaves the leftmost entry
+under the client's control.
+
+For the same reason uvicorn is started **without** `--proxy-headers` in the
+image. If you want `request.client.host` itself rewritten (access logs, other
+middleware), override the command with both flags and name the proxy — never
+`*`:
+
+```yaml
+command: >
+  uvicorn clipcatalyst_api.main:app --host 0.0.0.0 --port 8000
+  --proxy-headers --forwarded-allow-ips 172.18.0.2
+```
 
 ### 7.3 Retention
 

@@ -30,8 +30,13 @@ _COLUMNS = (
     "updated_at",
     "clips_json",
     "user_id",
+    "usage_reserved",
+    "usage_month",
 )
 
+# `usage_reserved`/`usage_month` are deliberately NOT updatable: the quota a
+# job is holding changes only through reserve_usage / settle_usage, which move
+# it in the same transaction as the counter it is holding.
 _UPDATABLE = {
     "status",
     "stage",
@@ -85,7 +90,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
     clips_json    TEXT NOT NULL DEFAULT '[]',
-    user_id       TEXT NOT NULL DEFAULT ''
+    user_id       TEXT NOT NULL DEFAULT '',
+    usage_reserved INTEGER NOT NULL DEFAULT 0,
+    usage_month    TEXT NOT NULL DEFAULT ''
 )
 """,
     """
@@ -148,6 +155,14 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
     if "user_id" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+    # The quota a running job is holding (see reserve_usage). Older rows carry
+    # 0 = "holding nothing", which is exactly how a settled job reads.
+    if "usage_reserved" not in columns:
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN usage_reserved INTEGER NOT NULL DEFAULT 0"
+        )
+    if "usage_month" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN usage_month TEXT NOT NULL DEFAULT ''")
 
 
 def init_db() -> None:
@@ -265,10 +280,21 @@ def reconcile_stalled(processing_cutoff_iso: str) -> int:
     """Fail jobs stuck in processing/queued past a cutoff (crash recovery).
 
     Returns the number of rows failed. Called on API startup so a worker that
-    died mid-job never strands a row in a non-terminal state forever.
+    died mid-job never strands a row in a non-terminal state forever — and,
+    with it, the monthly quota that job reserved at /start. A process that
+    died rendered nothing the owner can use, so the reservation goes back
+    here exactly as it would on an ordinary failure.
     """
     with contextlib.closing(_connect()) as conn:
         _ensure_schema(conn)
+        stalled = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM jobs"
+                " WHERE status IN ('queued', 'processing') AND updated_at < ?",
+                (processing_cutoff_iso,),
+            )
+        ]
         cur = conn.execute(
             "UPDATE jobs SET status = 'failed',"
             " error = 'Processing was interrupted — please try again.',"
@@ -276,7 +302,12 @@ def reconcile_stalled(processing_cutoff_iso: str) -> int:
             " WHERE status IN ('queued', 'processing') AND updated_at < ?",
             (_now(), processing_cutoff_iso),
         )
-        return cur.rowcount
+        failed = cur.rowcount
+    # Settlement is once-only, so a job that finished between the two reads
+    # keeps the bill its own worker settled.
+    for job_id in stalled:
+        settle_usage(job_id, 0)
+    return failed
 
 
 def delete_job(job_id: str) -> None:
@@ -414,6 +445,17 @@ def record_stripe_event(event_id: str) -> None:
         )
 
 
+# One upsert for every unconditional move of the monthly counter (add,
+# settle, release). The delta is bound twice — once for the row that may not
+# exist yet, once for the one that does — and clamped so it never goes below
+# zero on either branch.
+_USAGE_DELTA_SQL = (
+    "INSERT INTO usage (user_id, month, clips_used) VALUES (?, ?, MAX(0, ?))"
+    " ON CONFLICT (user_id, month)"
+    " DO UPDATE SET clips_used = MAX(0, usage.clips_used + ?)"
+)
+
+
 def get_usage(user_id: str, month: str) -> int:
     """Clips rendered by a user in a 'YYYY-MM' month; 0 when no row exists."""
     with contextlib.closing(_connect()) as conn:
@@ -426,12 +468,117 @@ def get_usage(user_id: str, month: str) -> int:
 
 
 def add_usage(user_id: str, month: str, clips: int) -> None:
-    """Atomically add rendered clips to a user's monthly counter (upsert)."""
+    """Atomically move a user's monthly counter by `clips` (upsert).
+
+    Negative deltas are how a reservation is settled or returned, so the
+    counter is clamped at zero — no bookkeeping mistake can ever hand somebody
+    a negative bill (i.e. free quota).
+    """
     with contextlib.closing(_connect()) as conn:
         _ensure_schema(conn)
-        conn.execute(
-            "INSERT INTO usage (user_id, month, clips_used) VALUES (?, ?, ?)"
-            " ON CONFLICT (user_id, month)"
-            " DO UPDATE SET clips_used = clips_used + excluded.clips_used",
-            (user_id, month, int(clips)),
-        )
+        conn.execute(_USAGE_DELTA_SQL, (user_id, month, int(clips), int(clips)))
+
+
+def reserve_usage(
+    job_id: str, user_id: str, month: str, clips: int, *, limit: int | None
+) -> bool:
+    """Claim `clips` of a user's monthly quota UP FRONT; False = over quota.
+
+    The counter has to move before the work is queued, not after it renders:
+    a read-then-render check lets every job that starts before the first one
+    finishes read the same pre-render number and each decide it fits, which is
+    unbounded on an async queue. Here the ceiling is part of the write —
+
+        clips_used + clips <= limit
+
+    is evaluated by SQLite inside the single UPDATE, so concurrent starts are
+    serialized by the database and exactly one of them can take the last slot.
+    A refusal leaves the counter untouched.
+
+    `limit=None` (unlimited plans) skips the ceiling entirely but still records
+    the reservation, so `used` stays truthful and settlement is symmetric.
+
+    The reservation is stamped on the job row in the SAME transaction as the
+    counter, so a counter that moved always carries exactly one settlement
+    token to move it back (see settle_usage).
+    """
+    clips = int(clips)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if limit is not None and clips > limit:
+                # A single job bigger than the whole month can never fit, and
+                # the upsert's INSERT branch (no row yet) has no ceiling to
+                # stop it — this is that branch's guard.
+                applied = False
+            elif limit is None:
+                conn.execute(_USAGE_DELTA_SQL, (user_id, month, clips, clips))
+                applied = True
+            else:
+                cur = conn.execute(
+                    "INSERT INTO usage (user_id, month, clips_used) VALUES (?, ?, ?)"
+                    " ON CONFLICT (user_id, month)"
+                    " DO UPDATE SET clips_used = usage.clips_used + excluded.clips_used"
+                    " WHERE usage.clips_used + excluded.clips_used <= ?",
+                    (user_id, month, clips, limit),
+                )
+                applied = cur.rowcount == 1
+            if applied:
+                stamped = conn.execute(
+                    "UPDATE jobs SET usage_reserved = ?, usage_month = ?,"
+                    " updated_at = ? WHERE id = ?",
+                    (clips, month, _now(), job_id),
+                )
+                if stamped.rowcount != 1:
+                    # The job vanished under us (the reaper). A counter with no
+                    # job to settle it would bill forever — take nothing.
+                    conn.execute("ROLLBACK")
+                    return False
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return applied
+
+
+def settle_usage(job_id: str, rendered: int) -> int:
+    """Settle a job's reservation against what it really rendered, ONCE.
+
+    The owner keeps `rendered` clips of the reservation and gets the rest
+    back; `rendered=0` is a full release (a failed job costs nothing). Returns
+    the delta applied to the counter.
+
+    The token is cleared in the same transaction that moves the counter, so a
+    second call — a Celery retry, a failure path running after a completion,
+    a job that never reserved anything (anonymous/founder) — finds nothing to
+    settle and is a no-op returning 0. The month is the one the reservation
+    was taken in, so a job that starts in one month and finishes in the next
+    settles against the ceiling it actually consumed.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT user_id, usage_reserved, usage_month FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            delta = 0
+            reserved = 0 if row is None else int(row["usage_reserved"] or 0)
+            if reserved and row["user_id"]:
+                delta = int(rendered) - reserved
+                conn.execute(
+                    "UPDATE jobs SET usage_reserved = 0, updated_at = ? WHERE id = ?",
+                    (_now(), job_id),
+                )
+                if delta:
+                    conn.execute(
+                        _USAGE_DELTA_SQL,
+                        (row["user_id"], row["usage_month"], delta, delta),
+                    )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return delta

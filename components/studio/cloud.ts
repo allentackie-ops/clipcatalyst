@@ -97,9 +97,18 @@ export type CloudJob = {
   clips: CloudClip[];
 };
 
+/**
+ * True for a url pointing at an absolute origin — in practice a presigned S3
+ * url, i.e. somewhere that is NOT our API. The session bearer must never ride
+ * along to one (see uploadSource / toFinishedClips).
+ */
+function isAbsoluteUrl(url: string): boolean {
+  return /^https?:\/\//.test(url);
+}
+
 /** Resolve a possibly-relative API url (local mode) against the API base. */
 function resolveUrl(base: string, url: string): string {
-  return /^https?:\/\//.test(url) ? url : `${base}${url}`;
+  return isAbsoluteUrl(url) ? url : `${base}${url}`;
 }
 
 function abortError(): DOMException {
@@ -171,7 +180,7 @@ export function uploadSource(
     // Only the API's own (relative) upload path takes the session bearer —
     // a presigned S3 url carries its auth in the query string, and adding an
     // Authorization header on top makes S3 reject the request.
-    if (!/^https?:\/\//.test(uploadUrl)) {
+    if (!isAbsoluteUrl(uploadUrl)) {
       const token = tokenSource();
       if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     }
@@ -285,6 +294,10 @@ export type CloudFinishedClip = FinishedClip & { speakerCount?: number };
  * revoke them when the clips are dropped. A failed fetch falls back to the
  * raw url so one bad download can't sink the batch (founder-token/dev-open
  * servers still play it anonymously).
+ *
+ * S3 mode: the clip url is an ABSOLUTE presigned GET at the bucket, already
+ * authenticated in its query string — it takes no bearer (same guard as
+ * uploadSource) and is played straight from that url.
  */
 export async function toFinishedClips(
   base: string,
@@ -298,7 +311,12 @@ export async function toFinishedClips(
     const rawUrl = resolveUrl(base, clip.url);
     let url = rawUrl;
     let blob: Blob = { size: Number.NaN } as unknown as Blob;
-    if (token) {
+    // The bearer is for OUR api only. A presigned S3 clip url is a third
+    // party: sending the raw session token there writes it into someone
+    // else's request logs (S3 access logs, CloudTrail), and SigV4 rejects a
+    // request that carries a second Authorization header anyway — so the
+    // fetch would fail and every clip would silently fall back.
+    if (token && !isAbsoluteUrl(clip.url)) {
       try {
         const res = await fetch(rawUrl, {
           headers: { Authorization: `Bearer ${token}` },

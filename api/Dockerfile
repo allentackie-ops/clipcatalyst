@@ -55,4 +55,16 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
     CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/v1/healthz', timeout=3)" || exit 1
 
+# No --proxy-headers by default: uvicorn would then take X-Forwarded-For from
+# any peer in --forwarded-allow-ips, and a container that anyone can reach
+# directly must not believe a header a client can type. Behind the reverse
+# proxy DEPLOY.md §7.2 mandates, override the command with BOTH flags and name
+# the proxy explicitly (its address on the docker network, never "*"):
+#
+#   command: uvicorn clipcatalyst_api.main:app --host 0.0.0.0 --port 8000 \
+#            --proxy-headers --forwarded-allow-ips 172.18.0.2
+#
+# and set CC_TRUSTED_PROXIES to the same address so the auth rate limiter
+# counts per real client instead of lumping the whole internet into the
+# proxy's one bucket. Neither set = every request is attributed to the proxy.
 CMD ["uvicorn", "clipcatalyst_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

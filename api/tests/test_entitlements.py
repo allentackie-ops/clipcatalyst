@@ -10,12 +10,14 @@ cleared, and the settings-snapshotting modules (queue_app / worker / main) are
 purged for a clean re-import. The whole os.environ is snapshotted and restored
 around each client.
 
-Quota-only tests stub the pipeline out (``quiet_sandbox``): /start checks the
-quota BEFORE it claims the job, so the gate can be exercised without paying for
-a render. The usage-accounting test runs the real pipeline in eager mode
+Quota-only tests stub the pipeline out (``quiet_sandbox``): /start RESERVES
+the quota and claims the job, then dispatches nothing, so the gate can be
+exercised without paying for a render — and that is also the exact shape of
+the production (redis) queue, where /start returns long before anything
+renders. The usage-accounting tests run the real pipeline in eager mode
 (``CC_QUEUE=eager``) with a faked transcriber and a generated test video,
-because "increments by the number of clips ACTUALLY rendered" is only true if
-real clips were actually rendered.
+because "settles down to the clips ACTUALLY rendered" is only true if real
+clips were actually rendered.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -181,9 +185,10 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespac
 def quiet_sandbox(
     sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> SimpleNamespace:
-    """`sandbox` with the pipeline stubbed: /start still runs the quota check
-    and the atomic claim, then dispatches nothing. Renders cost ~seconds each
-    and prove nothing extra about a 402 that happens before the claim."""
+    """`sandbox` with the pipeline stubbed: /start still claims the job and
+    reserves its quota, then dispatches nothing. Renders cost ~seconds each and
+    prove nothing extra about a 402 — and a job that never completes is exactly
+    the state the quota bypass lived in."""
     from clipcatalyst_api import main
 
     monkeypatch.setattr(main, "process_job", SimpleNamespace(delay=lambda job_id: None))
@@ -595,3 +600,368 @@ def test_anonymous_renders_bill_no_one(
     assert db.get_usage(user_id, month) == 0
     assert db.get_usage("", month) == 0
     assert client.get("/v1/me", headers=_bearer(token)).json()["quota"]["used"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# 4. The quota is RESERVED at /start, then settled — the two proven bypasses.
+#
+# The counter used to move only at COMPLETION while /start merely read it, so
+# the ceiling only bound jobs that had already finished. Both holes below were
+# demonstrated end to end against the old code; each test here fails on it.
+# --------------------------------------------------------------------------- #
+
+
+def test_queued_jobs_cannot_outrun_the_quota(quiet_sandbox: SimpleNamespace) -> None:
+    """PROVEN BYPASS: five starts on a three-clip plan were all accepted.
+
+    Production runs CC_QUEUE=redis, so /start returns 202 the moment the task
+    is enqueued and the counter stays at 0 until a render finishes — every job
+    an attacker could queue before the first one completed read that same 0
+    and was admitted, rendering and billing all of them. `quiet_sandbox` is
+    that shape exactly: nothing here ever completes, so on the old code
+    nothing would ever bill.
+    """
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "queue-flood@example.com")
+    month = _month()
+
+    codes = [
+        _start(client, _ready_job(client, token, count=1), token).status_code
+        for _ in range(5)
+    ]
+    assert codes == [202, 202, 202, 402, 402], codes
+
+    # Three clips are spoken for even though not one of them has rendered, and
+    # the refusals cost nothing on top.
+    assert db.get_usage(user_id, month) == 3
+    assert client.get("/v1/me", headers=_bearer(token)).json()["quota"]["used"] == 3
+
+
+def test_concurrent_starts_cannot_both_take_the_last_clip(
+    quiet_sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PROVEN RACE: two starts that both read `used` before either wrote it
+    both fit through a one-clip gap.
+
+    The barrier makes the interleaving deterministic instead of hoping for
+    unlucky scheduling: both requests are held together at the owner lookup
+    that immediately precedes the quota gate, and released at the same instant.
+    Whatever the threads do next, the database is the one deciding who gets
+    the last clip.
+    """
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "racer@example.com")
+    month = _month()
+    db.add_usage(user_id, month, 2)  # exactly ONE clip left on the free plan
+
+    job_ids = [_ready_job(client, token, count=1) for _ in range(2)]
+
+    gate = threading.Barrier(2, timeout=30)
+    owner_lookup = db.get_user_by_id
+
+    def synchronized(owner_id: str) -> dict | None:
+        owner = owner_lookup(owner_id)
+        gate.wait()  # both starts stand at the quota gate together
+        return owner
+
+    monkeypatch.setattr(db, "get_user_by_id", synchronized)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        codes = sorted(pool.map(lambda j: _start(client, j, token).status_code, job_ids))
+
+    assert codes == [202, 402], codes
+    assert db.get_usage(user_id, month) == 3
+    # The loser's job was never burned either: it is still startable.
+    assert db.get_job(job_ids[0])["status"] in {"queued", "awaiting_upload"}
+
+
+def test_a_start_that_loses_the_claim_never_burns_quota(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """A duplicate /start is a 409, and a 409 must cost nothing: the job is
+    claimed BEFORE the reservation precisely so a start that loses the claim
+    cannot spend a clip the winner is already holding."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "double-start@example.com")
+    month = _month()
+    job_id = _ready_job(client, token, count=1)
+
+    assert _start(client, job_id, token).status_code == 202
+    assert db.get_usage(user_id, month) == 1
+    assert _start(client, job_id, token).status_code == 409
+    assert db.get_usage(user_id, month) == 1
+
+
+def test_a_refused_start_leaves_the_counter_and_the_job_alone(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """The reservation is all-or-nothing: a job that doesn't fit takes no part
+    of the quota, and the claim it briefly held is handed straight back."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "no-partials@example.com")
+    month = _month()
+    db.add_usage(user_id, month, 2)  # one clip left; this job wants three
+
+    job_id = _ready_job(client, token, count=3)
+    resp = _start(client, job_id, token)
+    assert resp.status_code == 402
+    assert "2 are used for" in resp.json()["detail"]
+    assert db.get_usage(user_id, month) == 2  # not 2 + a partial 1
+    job = db.get_job(job_id)
+    assert job["status"] == "awaiting_upload"  # startable again after an upgrade
+    assert job["usage_reserved"] == 0
+
+
+def test_the_reservation_is_booked_in_the_month_it_was_taken(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """Usage is keyed by UTC month; the settlement follows the reservation into
+    the month whose ceiling it actually consumed, not whatever month the render
+    happens to finish in."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "booked@example.com")
+    month = _month()
+
+    job_id = _ready_job(client, token, count=2)
+    assert _start(client, job_id, token).status_code == 202
+
+    job = db.get_job(job_id)
+    assert job["usage_reserved"] == 2
+    assert job["usage_month"] == month
+    assert db.get_usage(user_id, month) == 2
+    assert db.get_usage(user_id, "2000-01") == 0
+
+    assert db.settle_usage(job_id, 1) == -1
+    assert db.get_usage(user_id, month) == 1
+    assert db.get_usage(user_id, "2000-01") == 0
+
+
+def test_settlement_bills_only_the_clips_that_rendered(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """A three-clip job holds three; if two render, the third comes back and
+    is immediately spendable again."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "settler@example.com")
+    month = _month()
+
+    job_id = _ready_job(client, token, count=3)
+    assert _start(client, job_id, token).status_code == 202
+    assert db.get_usage(user_id, month) == 3  # the whole free month, up front
+
+    # What worker._run does on completion, with two of the three clips rendered.
+    assert db.settle_usage(job_id, 2) == -1
+    assert db.get_usage(user_id, month) == 2
+    assert client.get("/v1/me", headers=_bearer(token)).json()["quota"]["used"] == 2
+    assert db.get_job(job_id)["usage_reserved"] == 0
+
+    # The returned clip is real quota: the next single-clip job fits.
+    assert _start(client, _ready_job(client, token, count=1), token).status_code == 202
+    assert _start(client, _ready_job(client, token, count=1), token).status_code == 402
+
+
+def test_settling_twice_never_double_bills(quiet_sandbox: SimpleNamespace) -> None:
+    """Celery can redeliver a task, and a job that fails after clips were
+    already settled runs the release path on top of the completion path.
+    Settlement is once-only, so every extra call is a no-op."""
+    from clipcatalyst_api import db, worker
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "retried@example.com")
+    month = _month()
+
+    job_id = _ready_job(client, token, count=3)
+    assert _start(client, job_id, token).status_code == 202
+    assert db.get_usage(user_id, month) == 3
+
+    assert db.settle_usage(job_id, 2) == -1
+    assert db.settle_usage(job_id, 2) == 0  # the retry
+    assert db.settle_usage(job_id, 0) == 0  # a failure path arriving afterwards
+    worker._fail(job_id, "late failure")  # the same, through the worker
+    assert db.get_usage(user_id, month) == 2
+
+    # A job that never reserved anything (anonymous) settles to nothing at all.
+    anon_job = _ready_job(client, None, count=3)
+    assert db.settle_usage(anon_job, 3) == 0
+    assert db.get_usage("", month) == 0
+
+
+def test_the_monthly_counter_never_goes_negative(sandbox: SimpleNamespace) -> None:
+    """Releases are negative deltas on a shared counter — no ordering of them
+    may ever leave a user with a negative bill (i.e. free clips)."""
+    from clipcatalyst_api import db
+
+    month = _month()
+    db.add_usage("counter@example.com", month, 2)
+    db.add_usage("counter@example.com", month, -5)
+    assert db.get_usage("counter@example.com", month) == 0
+    db.add_usage("fresh@example.com", month, -5)  # no row yet
+    assert db.get_usage("fresh@example.com", month) == 0
+    db.add_usage("fresh@example.com", month, 1)
+    assert db.get_usage("fresh@example.com", month) == 1
+
+
+def test_crash_recovery_hands_back_a_stranded_reservation(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """A worker killed mid-render never settles. Boot-time reconciliation
+    fails the stranded row, so it has to return the quota too — otherwise a
+    crash silently costs the owner a month they never rendered."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(client, "stranded@example.com")
+    month = _month()
+
+    job_id = _ready_job(client, token, count=3)
+    assert _start(client, job_id, token).status_code == 202  # queued, never runs
+    assert db.get_usage(user_id, month) == 3
+
+    # What _lifespan does on the next boot, with a cutoff past this row.
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(
+        timespec="milliseconds"
+    )
+    assert db.reconcile_stalled(future) == 1
+    assert db.get_job(job_id)["status"] == "failed"
+    assert db.get_usage(user_id, month) == 0
+    assert db.get_job(job_id)["usage_reserved"] == 0
+    # Running it again neither re-fails nor re-refunds anything.
+    assert db.reconcile_stalled(future) == 0
+    assert db.get_usage(user_id, month) == 0
+
+
+def test_a_reservation_with_no_job_to_settle_it_is_refused(
+    sandbox: SimpleNamespace,
+) -> None:
+    """The counter and the settlement token move together or not at all: a
+    reservation that cannot be stamped on a job (the reaper deleted it) would
+    bill forever with nothing to hand it back."""
+    from clipcatalyst_api import db
+
+    month = _month()
+    assert db.reserve_usage("f" * 32, "ghost@example.com", month, 2, limit=3) is False
+    assert db.get_usage("ghost@example.com", month) == 0
+    # Unlimited plans take the same path and get the same protection.
+    assert db.reserve_usage("f" * 32, "ghost@example.com", month, 2, limit=None) is False
+    assert db.get_usage("ghost@example.com", month) == 0
+
+
+def test_unlimited_plans_reserve_without_a_ceiling(
+    quiet_sandbox: SimpleNamespace,
+) -> None:
+    """Enterprise has no clips_per_month, so the reservation records the work
+    and never refuses it."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    token, user_id = _account(
+        client, "unlimited-reserve@example.com", plan="enterprise", status="active"
+    )
+    month = _month()
+    db.add_usage(user_id, month, 100_000)
+
+    assert _start(client, _ready_job(client, token, count=3), token).status_code == 202
+    assert db.get_usage(user_id, month) == 100_003
+    assert client.get("/v1/me", headers=_bearer(token)).json()["quota"] == {
+        "limit": None,
+        "used": 100_003,
+        "month": month,
+    }
+
+
+def test_owner_less_starts_reserve_nothing(quiet_sandbox: SimpleNamespace) -> None:
+    """Founder and dev-open jobs bill no one, so they hold no reservation —
+    there is nothing for the worker to settle and nobody to charge."""
+    from clipcatalyst_api import db
+
+    client = quiet_sandbox.client
+    month = _month()
+
+    job_id = _ready_job(client, None, count=3)
+    assert _start(client, job_id, None).status_code == 202
+    assert db.get_job(job_id)["usage_reserved"] == 0
+    assert db.get_usage("", month) == 0
+
+    _set_token(FOUNDER_TOKEN)
+    try:
+        founder_job = _ready_job(client, FOUNDER_TOKEN, count=3)
+        assert _start(client, founder_job, FOUNDER_TOKEN).status_code == 202
+        assert db.get_job(founder_job)["usage_reserved"] == 0
+    finally:
+        _set_token(None)
+    assert db.get_usage("", month) == 0
+
+
+def test_a_failed_job_returns_the_whole_reservation(sandbox: SimpleNamespace) -> None:
+    """A job that renders nothing costs nothing. The uploaded "source" here is
+    21 bytes of junk, so the real pipeline fails at the probe — the worker's
+    failure path has to hand the reservation back or a free account could be
+    locked out of its own month by three broken uploads."""
+    from clipcatalyst_api import db
+
+    client = sandbox.client
+    token, user_id = _account(client, "doomed@example.com")
+    month = _month()
+
+    job_id = _ready_job(client, token, count=3)
+    assert _start(client, job_id, token).status_code == 202  # eager: fails inline
+    status = client.get(f"/v1/jobs/{job_id}", headers=_bearer(token)).json()
+    assert status["status"] == "failed", status
+
+    assert db.get_usage(user_id, month) == 0
+    assert db.get_job(job_id)["usage_reserved"] == 0
+    assert client.get("/v1/me", headers=_bearer(token)).json()["quota"]["used"] == 0
+    # The whole month is genuinely available again.
+    assert _start(client, _ready_job(client, token, count=3), token).status_code == 202
+
+
+def test_a_completed_job_settles_down_to_what_it_rendered(
+    sandbox: SimpleNamespace, source_video: Path
+) -> None:
+    """End to end through the real worker: the fixture video plans ONE clip, so
+    a three-clip job holds three at /start and hands the rest back when it
+    finishes — the counter ends on the clips that exist, not the ones asked
+    for."""
+    from clipcatalyst_api import db
+
+    client = sandbox.client
+    token, user_id = _account(client, "settle-e2e@example.com")
+    month = _month()
+
+    created = _create_job(
+        client, token, size_bytes=source_video.stat().st_size, count=3, height=960
+    )
+    job_id = created["job_id"]
+    assert (
+        client.put(
+            f"/v1/uploads/{job_id}",
+            content=source_video.read_bytes(),
+            headers=_bearer(token),
+        ).status_code
+        == 200
+    )
+    assert _start(client, job_id, token).status_code == 202  # eager: renders inline
+
+    status = client.get(f"/v1/jobs/{job_id}", headers=_bearer(token)).json()
+    assert status["status"] == "done", f"pipeline failed: {status.get('error')!r}"
+    rendered = len(status["clips"])
+    assert 1 <= rendered < 3, rendered  # fewer rendered than reserved
+
+    assert db.get_usage(user_id, month) == rendered
+    assert db.get_job(job_id)["usage_reserved"] == 0
+    assert client.get("/v1/me", headers=_bearer(token)).json()["quota"] == {
+        "limit": 3,
+        "used": rendered,
+        "month": month,
+    }

@@ -10,17 +10,23 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
+import logging
 import re
 import secrets
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from typing import Sequence
 
 from fastapi import Header, HTTPException
 
 from . import db
 from .settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Passwords: stdlib scrypt (no extra dependency).
@@ -51,17 +57,35 @@ def is_valid_email(email: str) -> bool:
     return len(email) <= 254 and bool(_EMAIL_RE.match(email))
 
 
+def normalize_password(password: str) -> str:
+    """NFKC — the form a password is hashed and compared in.
+
+    The same typed password has several Unicode encodings (a composed "é" vs
+    "e" + U+0301, a fullwidth "Ａ" vs "A"): without normalizing, signing in
+    from a different keyboard or IME than the one used at signup fails with a
+    generic "incorrect password". ASCII passwords are returned untouched.
+    """
+    return unicodedata.normalize("NFKC", password)
+
+
+def _scrypt(password: str, salt: bytes, params: tuple[int, int, int], dklen: int) -> bytes:
+    n, r, p = params
+    return hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=n,
+        r=r,
+        p=p,
+        maxmem=_SCRYPT_MAXMEM,
+        dklen=dklen,
+    )
+
+
 def hash_password(password: str) -> str:
     """Hash for storage: `scrypt$16384$8$1$<salt_b64>$<hash_b64>`."""
     salt = secrets.token_bytes(32)
-    digest = hashlib.scrypt(
-        password.encode("utf-8"),
-        salt=salt,
-        n=_SCRYPT_N,
-        r=_SCRYPT_R,
-        p=_SCRYPT_P,
-        maxmem=_SCRYPT_MAXMEM,
-        dklen=_SCRYPT_DKLEN,
+    digest = _scrypt(
+        normalize_password(password), salt, (_SCRYPT_N, _SCRYPT_R, _SCRYPT_P), _SCRYPT_DKLEN
     )
     salt_b64 = base64.b64encode(salt).decode("ascii")
     hash_b64 = base64.b64encode(digest).decode("ascii")
@@ -69,25 +93,37 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored: str) -> bool:
-    """Constant-time verify against a stored scrypt string; never raises."""
+    """Constant-time verify against a stored scrypt string; never raises.
+
+    The NFKC form is tried first — that is what `hash_password` stores. Then,
+    only when the raw string differs from it, the raw form is tried too:
+    accounts created before normalization landed stored the un-normalized
+    bytes, and there is no way to rewrite those rows without the plaintext, so
+    they can only be re-hashed the next time their owner signs in. Rejecting
+    them until then would lock existing users out of their own accounts. An
+    already-normalized password (every ASCII one) still runs exactly one
+    scrypt, so the common path costs nothing.
+    """
     try:
         algorithm, n_s, r_s, p_s, salt_b64, hash_b64 = stored.split("$")
         if algorithm != "scrypt":
             return False
         salt = base64.b64decode(salt_b64, validate=True)
         expected = base64.b64decode(hash_b64, validate=True)
-        candidate = hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=salt,
-            n=int(n_s),
-            r=int(r_s),
-            p=int(p_s),
-            maxmem=_SCRYPT_MAXMEM,
-            dklen=len(expected),
-        )
+        params = (int(n_s), int(r_s), int(p_s))
     except (ValueError, TypeError):
         return False
-    return hmac.compare_digest(candidate, expected)
+    candidates = [normalize_password(password)]
+    if candidates[0] != password:
+        candidates.append(password)
+    for candidate in candidates:
+        try:
+            digest = _scrypt(candidate, salt, params, len(expected))
+        except (ValueError, TypeError):
+            return False
+        if hmac.compare_digest(digest, expected):
+            return True
+    return False
 
 
 @lru_cache(maxsize=1)
@@ -151,6 +187,24 @@ def require_session(
 # --------------------------------------------------------------------------- #
 
 
+def matches_api_token(authorization: str | None, token: str) -> bool:
+    """Constant-time `Authorization: Bearer <CC_API_TOKEN>` check.
+
+    Compares BYTES, not str: ``hmac.compare_digest`` raises TypeError the
+    moment either str carries a non-ASCII codepoint, and this header is
+    attacker-controlled (starlette decodes headers as latin-1, so a raw
+    ``Authorization: Bearer é`` on the wire arrives as a perfectly ordinary
+    Python str). Comparing str turned that into an unhandled 500 on every
+    route that resolves an actor — including the deliberately credential-free
+    ``GET /v1/jobs/{id}``. Encoding first makes it a plain mismatch.
+    """
+    if authorization is None or not token:
+        return False
+    return hmac.compare_digest(
+        authorization.encode("utf-8"), (_BEARER_PREFIX + token).encode("utf-8")
+    )
+
+
 @dataclass(frozen=True)
 class Actor:
     """Resolved caller identity for the job routes."""
@@ -179,8 +233,7 @@ def require_actor(
     token = get_settings().api_token
     if not token:
         return Actor()
-    expected = _BEARER_PREFIX + token
-    if authorization is None or not hmac.compare_digest(authorization, expected):
+    if not matches_api_token(authorization, token):
         raise HTTPException(status_code=401, detail="Missing or invalid API token.")
     return Actor(founder=True)
 
@@ -197,12 +250,7 @@ def optional_actor(
     """
     if bearer_session_token(authorization) is not None:
         return Actor(user=require_session(authorization))
-    token = get_settings().api_token
-    if (
-        token
-        and authorization is not None
-        and hmac.compare_digest(authorization, _BEARER_PREFIX + token)
-    ):
+    if matches_api_token(authorization, get_settings().api_token):
         return Actor(founder=True)
     return Actor()
 
@@ -219,6 +267,60 @@ def optional_actor(
 # a shared store (redis) if that changes.
 RATE_LIMIT_PER_MINUTE = 10
 _rate_windows: dict[tuple[str, str], tuple[int, int]] = {}
+
+
+_Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+@lru_cache(maxsize=4)
+def _trusted_networks(entries: tuple[str, ...]) -> tuple[_Network, ...]:
+    """CC_TRUSTED_PROXIES parsed into networks; unparseable entries are dropped."""
+    networks: list[_Network] = []
+    for entry in entries:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logger.warning(
+                "CC_TRUSTED_PROXIES entry %r is not an ip address or CIDR block "
+                "— ignoring it (forwarded headers from that peer stay untrusted)",
+                entry,
+            )
+    return tuple(networks)
+
+
+def client_ip(peer: str, forwarded_for: str | None, trusted_proxies: Sequence[str]) -> str:
+    """The address rate limits are counted against.
+
+    ``peer`` is the socket's own address — the only thing here a client cannot
+    choose. Behind the reverse proxy DEPLOY.md mandates, that address is the
+    proxy's for EVERY caller, which would collapse the whole internet into one
+    bucket: one attacker at a trickle locks every account out of login and
+    signup, and per-client credential-stuffing protection stops existing.
+
+    So ``X-Forwarded-For``'s leftmost entry is used instead — but ONLY when the
+    peer is one of the proxies the operator configured in CC_TRUSTED_PROXIES
+    (default: nobody). Trusting that header unconditionally is strictly worse
+    than not having a limiter: it is a request header, so anyone can rotate it
+    per attempt and never be counted. The proxy must be configured to REPLACE
+    the header with the real peer (Caddy: `header_up X-Forwarded-For
+    {remote_host}`) — a proxy that appends leaves the leftmost entry
+    client-written. Anything that isn't an ip address falls back to the peer,
+    so a malformed header cannot mint unbounded window keys either.
+    """
+    if not forwarded_for or not trusted_proxies:
+        return peer
+    try:
+        peer_address = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer  # non-ip peers (unix socket, test transport) are never proxies
+    if not any(peer_address in net for net in _trusted_networks(tuple(trusted_proxies))):
+        return peer
+    leftmost = forwarded_for.split(",")[0].strip()
+    try:
+        ipaddress.ip_address(leftmost)
+    except ValueError:
+        return peer
+    return leftmost
 
 
 def _current_minute() -> int:

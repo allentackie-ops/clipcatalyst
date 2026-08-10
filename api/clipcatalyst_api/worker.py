@@ -33,7 +33,7 @@ from .pipeline.types import (
     RenderOptions,
     Transcript,
 )
-from .plans import PLANS, effective_plan
+from .plans import PLANS, Plan, effective_plan
 from .queue_app import celery_app
 from .settings import Settings, get_settings
 from .storage import Storage, get_storage
@@ -105,7 +105,20 @@ def process_job(self, job_id: str) -> None:
 
 
 def _fail(job_id: str, message: str) -> None:
-    """Record a terminal failed status; never let bookkeeping raise on us."""
+    """Record a terminal failed status; never let bookkeeping raise on us.
+
+    A job that fails rendered nothing the owner asked for, so the whole quota
+    reservation /start took goes back — released BEFORE the status write, so a
+    process that dies between the two (the soft time limit fires ~60 s before
+    the hard kill) leaves a non-terminal row that boot-time reconciliation
+    still sweeps, rather than a terminal one holding quota nobody will ever
+    return. Settling is once-only, so this is safe on a Celery retry and after
+    a partial success that already settled.
+    """
+    try:
+        db.settle_usage(job_id, 0)
+    except Exception:
+        logger.exception("job %s: could not release the quota reservation", job_id)
     try:
         db.update_job(job_id, status="failed", error=message)
     except Exception:
@@ -272,7 +285,7 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
     )
 
     # --- render (sequential, per-clip failure isolation) -----------------
-    opts = RenderOptions(height=int(job["height"]), watermark=_watermark_for(job))
+    opts = RenderOptions(height=_height_for(job), watermark=_watermark_for(job))
     clips: list[dict] = []
     failed_count = 0
 
@@ -327,16 +340,14 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail=done_detail,
         error=None,
     )
-    # Quota bookkeeping: bill the owner for the clips ACTUALLY rendered (a
-    # failed clip costs nothing), against the UTC month of completion. This is
-    # the same table /v1/me and the start-time quota check read, so the account
-    # page can never disagree with enforcement. Anonymous jobs bill no one.
-    if job["user_id"]:
-        db.add_usage(
-            str(job["user_id"]),
-            datetime.now(timezone.utc).strftime("%Y-%m"),
-            len(clips),
-        )
+    # Quota bookkeeping: /start already RESERVED this job's whole `count`
+    # against the owner's month, so completion only settles the difference —
+    # the owner keeps the clips that ACTUALLY rendered and gets the rest back
+    # (a failed clip costs nothing). This is the same table /v1/me and the
+    # start-time reservation read, so the account page can never disagree with
+    # enforcement. Anonymous jobs reserved nothing, so this is a no-op for
+    # them, and settling twice (a Celery retry) is a no-op too.
+    db.settle_usage(job_id, len(clips))
 
 
 def _diarize_transcript(
@@ -372,22 +383,52 @@ def _diarize_transcript(
         return transcript, 1
 
 
+def _owner_entitlements(job: dict) -> Plan | None:
+    """The job owner's EFFECTIVE plan entitlements, as of render time.
+
+    None for the cases with no live account behind the job: anonymous
+    founder/dev jobs (user_id ""), and owned jobs whose user row is gone.
+    Reading the plan here rather than trusting the job row is the point —
+    an upgrade that lands between create and start is honoured, and a plan
+    that lapsed in that window cannot keep spending the entitlements it had
+    when the row was written. Nothing the client sent is read.
+    """
+    owner_id = str(job.get("user_id") or "")
+    if not owner_id:
+        return None
+    user = db.get_user_by_id(owner_id)
+    if user is None:
+        return None
+    return PLANS[effective_plan(user)]
+
+
 def _watermark_for(job: dict) -> bool:
     """Whether this job's renders carry the watermark. Server-side facts only.
 
     Anonymous founder/dev jobs keep the cloud default — watermarked, exactly
-    today's output. Owned jobs follow the owner's EFFECTIVE plan as of render
-    time (free and lapsed-paid plans require it; live paid plans drop it), so
-    an upgrade that lands between create and start is honoured and a canceled
-    plan can't keep exporting clean clips. Nothing the client sent is read.
+    today's output. Owned jobs follow the owner's effective plan (free and
+    lapsed-paid plans require it; live paid plans drop it).
     """
-    owner_id = str(job.get("user_id") or "")
-    if not owner_id:
-        return True
-    user = db.get_user_by_id(owner_id)
-    if user is None:
-        return True
-    return PLANS[effective_plan(user)].watermark_required
+    entitlements = _owner_entitlements(job)
+    return True if entitlements is None else entitlements.watermark_required
+
+
+def _height_for(job: dict) -> int:
+    """The render height for this job, re-clamped to the owner's plan NOW.
+
+    ``create_job`` clamps the requested height to the plan the account held at
+    create time and stores the result — but the row then outlives the plan. A
+    Pro account could stockpile unstarted 4K jobs, downgrade, and drain them:
+    the stored 3840 would render 4K on a free account forever. So the ceiling
+    is re-derived at render time exactly like the watermark, and the stored
+    height only ever tightens (a smaller ask is never raised by an upgrade —
+    the user chose it).
+    """
+    height = int(job["height"])
+    entitlements = _owner_entitlements(job)
+    if entitlements is None:
+        return height
+    return min(height, entitlements.max_height)
 
 
 def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> dict:

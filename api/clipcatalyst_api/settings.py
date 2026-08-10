@@ -44,6 +44,9 @@ class Settings:
     ffmpeg_bin: str
     ffprobe_bin: str
     cors_origins: list[str] = field(default_factory=list)
+    # Reverse proxies whose X-Forwarded-For we believe (ips or CIDR blocks).
+    # Empty (the default) = trust nobody: the peer address IS the client.
+    trusted_proxies: list[str] = field(default_factory=list)
     max_upload_bytes: int = 2_000_000_000
     public_base_url: str = ""  # e.g. https://api.clipcatalyst.io; "" = relative
     fake_transcript_path: str = ""
@@ -79,6 +82,51 @@ class Settings:
         for d in (self.data_dir, self.uploads_dir, self.clips_dir, self.tmp_dir):
             d.mkdir(parents=True, exist_ok=True)
 
+    def duplicate_price_ids(self) -> dict[str, list[str]]:
+        """Stripe price ids configured for more than one plan.
+
+        Maps the repeated price id to the env var names that carry it. The
+        price → plan map (billing.price_to_plan) is a dict build, so a shared
+        price would silently resolve to whichever plan happens to be last —
+        never a decision worth guessing at.
+        """
+        by_price: dict[str, list[str]] = {}
+        for name, price_id in (
+            ("CC_STRIPE_PRICE_STARTER", self.stripe_price_starter),
+            ("CC_STRIPE_PRICE_PRO", self.stripe_price_pro),
+            ("CC_STRIPE_PRICE_ENTERPRISE", self.stripe_price_enterprise),
+        ):
+            if price_id:
+                by_price.setdefault(price_id, []).append(name)
+        return {price: names for price, names in by_price.items() if len(names) > 1}
+
+    def validate(self) -> None:
+        """Refuse to boot on a configuration that cannot enforce what it sells.
+
+        Called from ``create_app`` so a misconfigured box fails loudly at
+        startup instead of quietly serving unmetered renders (or granting the
+        wrong plan) in production. Everything checked here is a deployment
+        state, never client input.
+        """
+        if self.billing == "off":
+            return  # the dev default: no revenue to gate, no price map to build
+        if not self.api_token:
+            raise RuntimeError(
+                f"CC_BILLING={self.billing!r} but CC_API_TOKEN is empty. With no "
+                "founder token the job routes stay open to anonymous callers, "
+                "who are not attached to any account — they skip plan "
+                "entitlements and the monthly quota entirely (4K, unmetered), so "
+                "every plan limit becomes optional. Set CC_API_TOKEN "
+                "(openssl rand -hex 32) or set CC_BILLING=off. See DEPLOY.md §7.1."
+            )
+        for price_id, names in self.duplicate_price_ids().items():
+            raise RuntimeError(
+                f"{' and '.join(names)} are all set to {price_id!r}. One Stripe "
+                "price cannot map to two plans — a webhook carrying it would "
+                "grant whichever plan won the map build. Give each plan its own "
+                "price id."
+            )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -105,6 +153,11 @@ def get_settings() -> Settings:
                 "https://allentackie-ops.github.io,http://localhost:3000,http://localhost:3100",
             ).split(",")
             if o.strip()
+        ],
+        trusted_proxies=[
+            p.strip()
+            for p in os.environ.get("CC_TRUSTED_PROXIES", "").split(",")
+            if p.strip()
         ],
         max_upload_bytes=int(os.environ.get("CC_MAX_UPLOAD_BYTES", "2000000000")),
         public_base_url=os.environ.get("CC_PUBLIC_BASE_URL", "").rstrip("/"),

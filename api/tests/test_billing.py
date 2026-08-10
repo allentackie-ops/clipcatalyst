@@ -31,6 +31,7 @@ from typing import Iterator
 import pytest
 import stripe
 
+FOUNDER_TOKEN = "s3cr3t-founder-token"
 WEBHOOK_SECRET = "whsec_test_c0ffee_1234567890abcdef"
 WRONG_SECRET = "whsec_test_not_the_configured_one"
 PRICE_STARTER = "price_test_starter"
@@ -112,6 +113,12 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespac
             "CC_DB_PATH": str(data_dir / "jobs.sqlite3"),
             "CC_PUBLIC_BASE_URL": "",
             "CC_BILLING": "fake",
+            # Billing being on REQUIRES a founder token (Settings.validate:
+            # without one the job routes stay open to anonymous callers, who
+            # skip every plan entitlement) — a billing-enabled app cannot even
+            # be constructed without it. Nothing in this module calls a
+            # founder-gated route; sessions carry all of its auth.
+            "CC_API_TOKEN": FOUNDER_TOKEN,
             "CC_STRIPE_WEBHOOK_SECRET": WEBHOOK_SECRET,
             "CC_STRIPE_PRICE_STARTER": PRICE_STARTER,
             "CC_STRIPE_PRICE_PRO": PRICE_PRO,
@@ -119,8 +126,7 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespac
             "CC_FRONTEND_ORIGIN": "https://clips.example",
         }
     )
-    for name in ("CC_API_TOKEN", "CC_STRIPE_SECRET_KEY"):
-        os.environ.pop(name, None)
+    os.environ.pop("CC_STRIPE_SECRET_KEY", None)
     _purge()
 
     from fastapi.testclient import TestClient

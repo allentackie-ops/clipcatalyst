@@ -71,9 +71,19 @@ class Gateway(Protocol):
 
 
 def get_gateway(settings: Settings) -> Gateway | None:
-    """The gateway for CC_BILLING, or None when billing is off."""
+    """The gateway for CC_BILLING, or None when billing is off.
+
+    Refuses an ambiguous price map (one price id on two plans) here as well as
+    at startup, so an env changed under a running process cannot quietly start
+    granting whichever plan the map build happened to leave last.
+    """
     if settings.billing == "off":
         return None
+    for price_id, names in settings.duplicate_price_ids().items():
+        raise ValueError(
+            f"{' and '.join(names)} are all set to {price_id!r} — one Stripe "
+            "price cannot map to two plans. Give each plan its own price id."
+        )
     if settings.billing == "stripe":
         return StripeGateway(settings)
     if settings.billing == "fake":

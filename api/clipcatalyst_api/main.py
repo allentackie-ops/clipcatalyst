@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
 import stripe
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -54,7 +54,24 @@ _BILLING_OFF = (
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client is not None else "unknown"
+    """Who to rate-limit, resolved through the trusted-proxy rules (auth.py)."""
+    peer = request.client.host if request.client is not None else "unknown"
+    return auth.client_ip(
+        peer,
+        request.headers.get("X-Forwarded-For"),
+        get_settings().trusted_proxies,
+    )
+
+
+def _no_store(response: Response) -> None:
+    """Mark a response as never-cacheable.
+
+    Credential and account responses carry a session token or a user's plan
+    and usage; a shared cache (or a browser's back/forward store) holding onto
+    either is a leak, so they are explicitly no-store rather than relying on
+    an intermediary's defaults.
+    """
+    response.headers["Cache-Control"] = "no-store"
 
 
 def _current_month() -> str:
@@ -119,7 +136,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="ClipCatalyst Cloud API", version=API_VERSION, lifespan=_lifespan)
+    # A box that cannot enforce what it sells must not boot (settings.validate
+    # explains each refusal); this runs before a single route is registered.
+    settings.validate()
+    # The interactive docs are a dev convenience: they enumerate every route
+    # and schema. A configured CC_API_TOKEN is the "this box is public" signal,
+    # so /docs, /redoc and /openapi.json switch off with it.
+    public_docs = not settings.api_token
+    app = FastAPI(
+        title="ClipCatalyst Cloud API",
+        version=API_VERSION,
+        lifespan=_lifespan,
+        docs_url="/docs" if public_docs else None,
+        redoc_url="/redoc" if public_docs else None,
+        openapi_url="/openapi.json" if public_docs else None,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -136,7 +167,8 @@ def _build_router():  # noqa: ANN202 - APIRouter
     router = APIRouter(prefix="/v1")
 
     @router.post("/auth/register", response_model=AuthResponse, status_code=201)
-    def register(body: RegisterRequest, request: Request) -> AuthResponse:
+    def register(body: RegisterRequest, request: Request, response: Response) -> AuthResponse:
+        _no_store(response)
         auth.enforce_rate_limit(_client_ip(request), "register")
         email = auth.normalize_email(body.email)
         if not auth.is_valid_email(email):
@@ -159,7 +191,8 @@ def _build_router():  # noqa: ANN202 - APIRouter
         return _signed_in(user)
 
     @router.post("/auth/login", response_model=AuthResponse)
-    def login(body: LoginRequest, request: Request) -> AuthResponse:
+    def login(body: LoginRequest, request: Request, response: Response) -> AuthResponse:
+        _no_store(response)
         auth.enforce_rate_limit(_client_ip(request), "login")
         user = db.get_user_by_email(auth.normalize_email(body.email))
         # One generic 401 for unknown email and wrong password alike, and
@@ -172,8 +205,10 @@ def _build_router():  # noqa: ANN202 - APIRouter
 
     @router.post("/auth/logout", response_model=LogoutResponse)
     def logout(
+        response: Response,
         authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> LogoutResponse:
+        _no_store(response)
         auth.require_session(authorization)  # 401 unless the session is live
         raw = auth.bearer_session_token(authorization)
         assert raw is not None  # require_session guarantees a session bearer
@@ -181,7 +216,10 @@ def _build_router():  # noqa: ANN202 - APIRouter
         return LogoutResponse()
 
     @router.get("/me", response_model=MeResponse)
-    def me(user: dict = Depends(auth.require_session)) -> MeResponse:
+    def me(
+        response: Response, user: dict = Depends(auth.require_session)
+    ) -> MeResponse:
+        _no_store(response)
         # `plan`/`plan_status` are the stored subscription facts; quota and
         # entitlements come from the EFFECTIVE plan (canceled → free), read
         # from the same table enforcement uses, so this can never disagree
@@ -223,8 +261,16 @@ def _build_router():  # noqa: ANN202 - APIRouter
 
     @router.post("/billing/checkout", response_model=CheckoutResponse)
     def billing_checkout(
-        body: CheckoutRequest, user: dict = Depends(auth.require_session)
+        body: CheckoutRequest,
+        request: Request,
+        response: Response,
+        user: dict = Depends(auth.require_session),
     ) -> CheckoutResponse:
+        _no_store(response)
+        # Each checkout mints a Stripe Checkout Session (a real API call in
+        # stripe mode, and a customer record on first use), so it gets the same
+        # per-client window as the credential routes.
+        auth.enforce_rate_limit(_client_ip(request), "checkout")
         settings = get_settings()
         gateway = _require_gateway()
         plan = body.plan.strip().lower()
@@ -422,34 +468,16 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 status_code=409, detail="Upload the video before starting the job."
             )
 
-        # Monthly quota, checked BEFORE the job is claimed so a 402 leaves it
-        # startable once the month rolls over or the plan grows. The quota
-        # rides on the job's OWNER (usage is billed to them however the start
-        # arrives); anonymous founder/dev jobs have no owner and no quota.
+        # The quota rides on the job's OWNER (usage is billed to them however
+        # the start arrives); anonymous founder/dev jobs have no owner and no
+        # quota. A deleted owner leaves the job unmetered, as before.
         owner_id = str(job.get("user_id") or "")
-        if owner_id:
-            owner = db.get_user_by_id(owner_id)
-            if owner is not None:
-                plan_name = effective_plan(owner)
-                limit = PLANS[plan_name].clips_per_month
-                if limit is not None:
-                    month = _current_month()
-                    used = db.get_usage(owner_id, month)
-                    if used + int(job["count"]) > limit:
-                        raise HTTPException(
-                            status_code=402,
-                            detail=(
-                                f"Monthly clip limit reached — the {plan_name} "
-                                f"plan includes {limit} clips per month, "
-                                f"{used} are used for {month}, and this job "
-                                f"would render {int(job['count'])} more. The "
-                                f"counter resets in {_next_month(month)}."
-                            ),
-                        )
+        owner = db.get_user_by_id(owner_id) if owner_id else None
 
         # Atomically claim the job so concurrent / duplicate starts can't both
         # enqueue it — only the caller that wins the awaiting_upload→queued move
-        # gets to dispatch the pipeline task.
+        # gets to dispatch the pipeline task. The claim comes FIRST so a start
+        # that loses it (409) never touches the owner's quota.
         started = db.transition_status(
             job_id,
             expect="awaiting_upload",
@@ -461,8 +489,48 @@ def _build_router():  # noqa: ANN202 - APIRouter
         )
         if not started:
             raise HTTPException(status_code=409, detail="Job already started.")
-        # In eager mode (CC_QUEUE=eager) this runs the whole pipeline inline.
-        process_job.delay(job_id)
+
+        # Monthly quota: RESERVED here, not merely read. The counter moves for
+        # the whole job before anything is queued, so jobs that are already in
+        # flight (on a real broker /start returns long before they render)
+        # count against the ceiling instead of every one of them reading the
+        # same pre-render number. The worker settles the reservation against
+        # what actually rendered, and returns all of it if the job fails.
+        if owner is not None:
+            count = int(job["count"])
+            plan_name = effective_plan(owner)
+            limit = PLANS[plan_name].clips_per_month
+            month = _current_month()
+            if not db.reserve_usage(job_id, owner_id, month, count, limit=limit):
+                # Nothing was spent, so give the claim back: a 402 must leave
+                # the job startable once the month rolls over or the plan grows.
+                db.transition_status(
+                    job_id,
+                    expect="queued",
+                    to="awaiting_upload",
+                    detail="Upload received",
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Monthly clip limit reached — the {plan_name} "
+                        f"plan includes {limit} clips per month, "
+                        f"{db.get_usage(owner_id, month)} are used for {month}, "
+                        f"and this job would render {count} more. The "
+                        f"counter resets in {_next_month(month)}."
+                    ),
+                )
+
+        try:
+            # In eager mode (CC_QUEUE=eager) this runs the whole pipeline inline.
+            process_job.delay(job_id)
+        except Exception:
+            # The task never reached the broker, so nothing will ever settle
+            # this reservation — hand the quota back here. The job stays
+            # claimed (a phantom double-render is worse than a stranded row,
+            # which reconcile_stalled fails on the next boot).
+            db.settle_usage(job_id, 0)
+            raise
         return StartJobResponse(job_id=job_id, status="queued")
 
     @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
@@ -511,7 +579,15 @@ def _build_router():  # noqa: ANN202 - APIRouter
         if not resolved.is_relative_to(clips_dir.resolve()) or not resolved.is_file():
             raise HTTPException(status_code=404, detail="Not found.")
         media_type = "video/mp4" if name.endswith(".mp4") else None
-        return FileResponse(resolved, media_type=media_type, filename=name)
+        # A rendered clip is one account's private video: shared caches must
+        # never keep a copy, and the browser must revalidate rather than serve
+        # it after the job is reaped or the session changes hands.
+        return FileResponse(
+            resolved,
+            media_type=media_type,
+            filename=name,
+            headers={"Cache-Control": "private, max-age=0"},
+        )
 
     @router.get("/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:

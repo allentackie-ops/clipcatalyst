@@ -73,6 +73,7 @@ export type StageId =
   | "model"
   | "transcribe"
   | "analyze"
+  | "reframe"
   | "render"
   | "done";
 

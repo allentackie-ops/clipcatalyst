@@ -20,6 +20,7 @@ const STAGE_ANNOUNCEMENTS: Record<StageId, string> = {
   model: "Loading AI model",
   transcribe: "Transcribing",
   analyze: "Scoring moments",
+  reframe: "Reframing on the speaker",
   render: "Rendering clips",
   done: "Done",
 };

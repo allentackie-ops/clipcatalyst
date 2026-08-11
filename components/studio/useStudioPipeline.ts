@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { decodeToMono16k, computeAudioFeatures } from "@/lib/studio/audio";
+import { EMPTY_KIT, loadKit } from "@/lib/studio/brandkit";
+import type { BrandKit } from "@/lib/studio/brandkit";
 import { buildCropTrack } from "@/lib/studio/croptrack";
 import type { CropTrack } from "@/lib/studio/croptrack";
 import { assignSpeakers, buildSpeechSegments } from "@/lib/studio/diarize";
@@ -47,6 +49,9 @@ export type StudioState =
       transcript: Transcript;
       /** What the clips were rendered with — re-renders must match. */
       renderOptions: RenderOptions;
+      /** The brand kit the clips were rendered with, so an edited clip
+       *  re-renders with the same corner and caption colour. */
+      brandKit: BrandKit;
       /** Planned clips that failed to render (0 normally). */
       failedCount: number;
     }
@@ -350,6 +355,20 @@ export function useStudioPipeline() {
         }
         if (abortedRef.current) return;
 
+        // The creator's brand kit, read once here rather than per clip: every
+        // clip in a batch carries the same corner. loadKit never throws and
+        // never blocks — EMPTY_KIT covers a blocked or absent IndexedDB, and
+        // the try/catch is the backstop, because a brand kit must never be
+        // the reason a render fails. renderClip applies the plan gate itself
+        // (`watermark` wins over the logo), so it is always safe to pass on.
+        let brandKit: BrandKit = EMPTY_KIT;
+        try {
+          brandKit = await loadKit();
+        } catch {
+          brandKit = EMPTY_KIT;
+        }
+        if (abortedRef.current) return;
+
         // Render each clip independently: one bad render shouldn't sink the batch.
         const clips: StudioClip[] = [];
         let lastRenderError: unknown = null;
@@ -364,6 +383,7 @@ export function useStudioPipeline() {
                 height: settings.height,
                 watermark: settings.watermark,
                 track: tracks[i],
+                brandKit,
               },
               (p) =>
                 onProgress({
@@ -394,6 +414,7 @@ export function useStudioPipeline() {
           sourceDuration: duration,
           transcript,
           renderOptions: { height: settings.height, watermark: settings.watermark },
+          brandKit,
           failedCount: plans.length - clips.length,
         });
       } catch (e) {

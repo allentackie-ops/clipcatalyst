@@ -16,6 +16,7 @@ import {
   type EditContext,
 } from "@/lib/studio/edits";
 import { renderClip, type RenderEdits } from "@/lib/studio/render";
+import type { BrandKit } from "@/lib/studio/brandkit";
 import type {
   ClipPlan,
   FinishedClip,
@@ -82,6 +83,7 @@ export default function ResultsView({
   sourceDuration,
   transcript,
   renderOptions,
+  brandKit,
   failedCount,
   onReset,
 }: {
@@ -90,6 +92,9 @@ export default function ResultsView({
   sourceDuration: number;
   transcript: Transcript;
   renderOptions: RenderOptions;
+  /** The kit the batch was rendered with — passed back into every re-render
+   *  so baking in an edit can't quietly strip a clip's branding. */
+  brandKit: BrandKit;
   failedCount: number;
   onReset: () => void;
 }) {
@@ -179,6 +184,7 @@ export default function ResultsView({
             watermark: renderOptions.watermark,
             track,
             edits,
+            brandKit,
           },
           (p) => updateSession(i, (s) => ({ ...s, rendering: p }))
         );
@@ -217,7 +223,15 @@ export default function ResultsView({
         }));
       }
     },
-    [clips, sourceUrl, sourceDuration, transcript, renderOptions, updateSession]
+    [
+      clips,
+      sourceUrl,
+      sourceDuration,
+      transcript,
+      renderOptions,
+      brandKit,
+      updateSession,
+    ]
   );
 
   const openEditor = useCallback((i: number) => {

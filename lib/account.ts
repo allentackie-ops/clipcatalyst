@@ -10,10 +10,19 @@
 // no third-party scripts, which is the surface that matters.
 
 import { CLOUD_API, setCloudTokenSource } from "@/components/studio/cloud";
+import { MAX_LOGO_BYTES, type BrandKit } from "@/lib/studio/brandkit";
 
 const TOKEN_KEY = "cc_session";
 
 export type Plan = "free" | "starter" | "pro" | "enterprise";
+
+/** A stored brand kit as the server reports it — the logo as a URL, never
+ *  bytes (BrandKitOut in api/clipcatalyst_api/models.py). */
+export type ServerBrandKit = {
+  logo_url: string | null;
+  caption_color: string | null;
+  show_logo: boolean;
+};
 
 /** GET /v1/me — the single account source the frontend trusts. */
 export type AccountUser = {
@@ -26,7 +35,16 @@ export type AccountUser = {
     max_height: number;
     watermark_required: boolean;
     clips_per_month: number | null;
+    /** Whether renders may carry this account's own logo and caption colour.
+     *  Its own promise — never inferred from `watermark_required`, which is a
+     *  different one that merely lines up today (BRANDKIT.md). Optional so a
+     *  server from before brand kits still parses. */
+    brand_kit?: boolean;
   };
+  /** The kit stored server-side. Present whatever the plan says — a kit
+   *  outlives a downgrade — so `entitlements.brand_kit` is what decides
+   *  whether a cloud render uses it. Optional for the same reason above. */
+  brand?: ServerBrandKit;
 };
 
 /** API failure with the HTTP status so callers can branch on 401/402/503.
@@ -67,7 +85,11 @@ setCloudTokenSource(getToken);
 
 async function request<T>(
   path: string,
-  opts: { method?: "GET" | "POST"; body?: unknown; auth?: boolean } = {}
+  opts: {
+    method?: "GET" | "POST" | "PUT" | "DELETE";
+    body?: unknown;
+    auth?: boolean;
+  } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
@@ -158,6 +180,76 @@ export function checkout(plan: Exclude<Plan, "free">): Promise<{ url: string }> 
 /** POST /v1/billing/portal → Stripe billing portal url. */
 export function portal(): Promise<{ url: string }> {
   return request<{ url: string }>("/v1/billing/portal", { auth: true });
+}
+
+// ---- Brand kit (BRANDKIT.md) ----
+// The kit itself is local-first — it lives in the browser so Studio works with
+// no account at all (lib/studio/brandkit.ts). These two calls are the SYNC:
+// they keep the server's copy identical so a cloud render draws the same
+// corner the browser does. Neither is on the path of a render.
+
+/**
+ * PUT /v1/me/brand — replaces the WHOLE kit. An absent logo means the kit has
+ * none, not "keep whatever is stored": the panel holds the complete kit
+ * locally and syncs it whole, and a PUT that meant anything else would stop
+ * being a PUT.
+ *
+ * The logo travels as the same `data:` URL the browser already stores; the
+ * server decodes it, measures the real bytes, and sniffs the content type
+ * rather than trusting anything sent with it. Throws AccountError(403) when
+ * the plan carries no brand kit — the caller surfaces that verbatim.
+ */
+export function putBrand(kit: BrandKit): Promise<ServerBrandKit> {
+  return request<ServerBrandKit>("/v1/me/brand", {
+    method: "PUT",
+    auth: true,
+    body: {
+      logo: kit.logo?.dataUrl ?? null,
+      caption_color: kit.captionColor,
+      show_logo: kit.showLogo,
+    },
+  });
+}
+
+/** DELETE /v1/me/brand — clears the stored kit, logo file included.
+ *  Deliberately NOT plan-gated server-side (main.py says why): taking your
+ *  own logo off our servers must not depend on what you're paying today. */
+export function deleteBrand(): Promise<ServerBrandKit> {
+  return request<ServerBrandKit>("/v1/me/brand", {
+    method: "DELETE",
+    auth: true,
+  });
+}
+
+/**
+ * GET /v1/me/brand/logo → the stored logo as a `data:` URL, so a creator
+ * signing in on a new device gets their kit back instead of an empty panel.
+ *
+ * Never throws and never rejects: null covers "no logo", a failed request, a
+ * file past the panel's own ceiling, and a browser with no FileReader. This
+ * is a convenience on top of the local kit — it must not be able to break the
+ * panel, let alone a render.
+ */
+export async function fetchBrandLogo(): Promise<string | null> {
+  const token = getToken();
+  if (token === null || typeof FileReader === "undefined") return null;
+  try {
+    const res = await fetch(`${CLOUD_API}/v1/me/brand/logo`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (blob.size === 0 || blob.size > MAX_LOGO_BYTES) return null;
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
 }
 
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);

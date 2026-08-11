@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, Container, Eyebrow, Logo } from "@/components/ui";
 import { useAccount } from "@/components/account/AccountProvider";
 import { useStudioPipeline } from "./useStudioPipeline";
+import BrandKitPanel from "./BrandKitPanel";
 import StudioDropzone from "./StudioDropzone";
 import StageChecklist from "./StageChecklist";
 import ClipCard from "./ClipCard";
@@ -936,6 +937,9 @@ export default function StudioApp() {
                   mobile={capabilities.isMobile}
                 />
               ) : null}
+              {/* Local-first and account-free: the kit lives in this browser,
+                  and useStudioPipeline reads it when a run starts. */}
+              <BrandKitPanel />
             </div>
           ) : state.status === "running" ? (
             <div className="animate-rise">
@@ -949,6 +953,7 @@ export default function StudioApp() {
                 sourceDuration={state.sourceDuration}
                 transcript={state.transcript}
                 renderOptions={state.renderOptions}
+                brandKit={state.brandKit}
                 failedCount={state.failedCount}
                 onReset={handleReset}
               />

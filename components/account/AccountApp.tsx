@@ -22,6 +22,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Badge, Button, Card, Container, Eyebrow } from "@/components/ui";
+import BrandKitPanel from "@/components/studio/BrandKitPanel";
 import { cloudEnabled } from "@/components/studio/cloud";
 import {
   checkout,
@@ -709,6 +710,12 @@ export default function AccountApp() {
               <div className="mt-8 grid gap-5 sm:grid-cols-2">
                 <PlanCard user={user} />
                 <UsageCard user={user} />
+              </div>
+
+              {/* Same component the Studio panel is, same local-first kit —
+                  here it also syncs to the account so cloud renders match. */}
+              <div className="mt-5">
+                <BrandKitPanel variant="account" />
               </div>
 
               <div className="mt-5">

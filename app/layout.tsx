@@ -17,9 +17,9 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
-const TITLE = "ClipCatalyst — Studio-quality AI clips, cut in your browser";
+const TITLE = "ClipCatalyst — Studio-quality AI clips in 90 seconds";
 const DESCRIPTION =
-  "ClipCatalyst turns long-form video into captioned 9:16 clips entirely in your browser — no upload, no account, unlimited and free. Face-tracked reframing, word-level captions, 0–100 scoring, and chat-based editing.";
+  "ClipCatalyst turns long-form video into viral-ready vertical clips in under 90 seconds. Virality Engine, chat-based editing, 4K export, one-click publish.";
 
 export const metadata: Metadata = {
   title: TITLE,

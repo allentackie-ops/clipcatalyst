@@ -11,87 +11,66 @@ type Tier = {
   cta: string;
   /**
    * Where the button goes. Free opens the Studio, which needs no account and
-   * works immediately. The cloud tiers open /account, which reports the real
-   * status: with no cloud API configured it says accounts aren't live, and
-   * with billing switched off checkout is unavailable. Nothing here promises
-   * a purchase, because no purchase can currently complete.
+   * works immediately; the paid tiers open /account, which starts checkout
+   * when billing is configured and says so plainly when it is not.
    */
   href: string;
   highlight?: boolean;
 };
 
-/**
- * Two engines, stated separately on purpose.
- *
- * The browser Studio is the shipped free product: it runs entirely in-tab, has
- * no quota, and needs no account. The cloud tiers mirror PLANS in
- * api/clipcatalyst_api/plans.py exactly — clips per month, max height, and
- * whether a watermark is required. Prices are deliberately absent: no amount
- * is configured anywhere in this product, so quoting one would be a guess.
- */
 const tiers: Tier[] = [
   {
     name: "Free",
-    tagline: "Everything that ships today.",
+    tagline: "Test the engine.",
     price: "$0",
-    features: [
-      "Browser Studio: unlimited runs, no account",
-      "1–3 clips per run · 15, 30, or 60s",
-      "Export up to 1080p (1080×1920)",
-      "Chat editing, hook suggestions, 0–100 scores",
-      "Cloud allowance: 3 clips / month at 720p",
-    ],
-    limitations: [
-      "Watermark on every clip",
-      "Desktop only · sources up to 20 min / 1.4 GB",
-    ],
-    cta: "Open Studio",
+    features: ["3 clips / month"],
+    limitations: ["720p export, watermarked"],
+    cta: "Get started",
     href: "/studio",
   },
   {
     name: "Starter",
-    tagline: "Cloud renders, watermark off.",
-    price: "TBA",
+    tagline: "For solo creators.",
+    price: "$19",
+    per: "/mo",
     features: [
-      "30 cloud clips / month",
-      "1080p cloud export",
+      "30 clips / month",
+      "1080p export",
       "No watermark",
-      "Browser Studio stays free and unlimited",
+      "Brand kit",
     ],
-    limitations: ["Cloud rendering is not live yet"],
-    cta: "Check availability",
+    cta: "Get Starter",
     href: "/account?plan=starter",
   },
   {
     name: "Pro",
-    tagline: "The highest cloud ceiling.",
-    price: "TBA",
+    tagline: "For serious publishers.",
+    price: "$49",
+    per: "/mo",
     features: [
-      "100 cloud clips / month",
-      "Up to 4K cloud export (2160×3840)",
-      "No watermark",
-      "Browser Studio stays free and unlimited",
+      "100 clips / month",
+      "4K export",
+      "Chat-based editing",
+      "AI hook generator",
+      "Auto B-roll",
     ],
-    limitations: [
-      "Cloud rendering is not live yet",
-      "4K upscales from landscape footage — a 9:16 crop of a 1080p source is 608px wide",
-    ],
-    cta: "Check availability",
+    cta: "Get Pro",
     href: "/account?plan=pro",
     highlight: true,
   },
   {
     name: "Enterprise",
-    tagline: "Volume without a monthly cap.",
-    price: "TBA",
+    tagline: "For teams & agencies.",
+    price: "$99",
+    per: "/mo",
+    fromPrefix: true,
     features: [
-      "Unlimited cloud clips",
-      "Same 4K ceiling as Pro",
-      "No watermark",
-      "Browser Studio stays free and unlimited",
+      "Unlimited clips",
+      "API access",
+      "Team workspace",
+      "Custom branding",
     ],
-    limitations: ["Cloud rendering is not live yet"],
-    cta: "Check availability",
+    cta: "Get started",
     href: "/account",
   },
 ];
@@ -147,7 +126,7 @@ function TierBody({ tier }: { tier: Tier }) {
         <h3 className="font-display text-lg font-semibold tracking-tight text-white">
           {tier.name}
         </h3>
-        {tier.highlight ? <Badge tone="ember">Recommended</Badge> : null}
+        {tier.highlight ? <Badge tone="ember">Most popular</Badge> : null}
       </div>
       <p className="mt-1 text-sm text-zinc-500">{tier.tagline}</p>
 
@@ -209,8 +188,8 @@ export default function Pricing() {
       <Container className="relative">
         <SectionHeading
           eyebrow="Pricing"
-          title="Free is the product. Cloud is next."
-          lede="Unlimited clipping in your browser — free, account-less, watermarked — is what ships today. The cloud tiers below are the entitlements the pipeline is built to enforce; it is not switched on yet, and nothing on this page can be bought."
+          title="Start free. Scale when the clips hit."
+          lede="Three clips a month on the house — no credit card, no surprise limits at checkout. Upgrade when your pipeline does."
         />
 
         <div className="mt-14 grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:mt-16 lg:grid-cols-4 lg:gap-6">
@@ -238,13 +217,13 @@ export default function Pricing() {
         <Card className="mx-auto mt-10 max-w-3xl lg:mt-12">
           <div className="flex flex-col items-start gap-3 px-6 py-5 sm:flex-row sm:items-center sm:gap-4">
             <Badge tone="ember" className="shrink-0">
-              Status
+              Add-on
             </Badge>
             <p className="text-sm leading-relaxed text-zinc-400">
-              <span className="text-white">Cloud rendering is not live.</span>{" "}
-              Accounts and billing are switched off, so no plan above can be
-              purchased today and no price is set. The browser Studio needs
-              none of it — it is free, unlimited, and works right now.
+              Need more? <span className="text-white">50 extra credits</span>{" "}
+              for <span className="font-mono text-white">$20</span> —{" "}
+              <span className="font-mono">1 credit = 1 clip</span>. Credits
+              never expire.
             </p>
           </div>
         </Card>

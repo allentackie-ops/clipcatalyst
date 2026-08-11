@@ -16,10 +16,10 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
   {
     title: "Compare",
     links: [
-      { label: "Browser vs. cloud", href: "#compare" },
-      { label: "Known limits", href: "#compare" },
-      { label: "Speed, honestly", href: "#speed" },
-      { label: "What ships today", href: "#features" },
+      { label: "vs. OpusClip", href: "#compare" },
+      { label: "vs. Klap", href: "#compare" },
+      { label: "vs. VEED", href: "#compare" },
+      { label: "vs. Descript", href: "#compare" },
     ],
   },
   {
@@ -36,6 +36,7 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
     links: [
       { label: "About", href: "#" },
       { label: "Blog", href: "#" },
+      { label: "Affiliates — 20% lifetime", href: "#" },
       { label: "Contact", href: "#" },
     ],
   },
@@ -49,8 +50,8 @@ export default function Footer() {
           <div>
             <Logo />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-zinc-500">
-              Studio-quality vertical clips, cut in your own browser. Built for
-              podcasters, streamers, and the teams behind them.
+              Studio-quality AI clips in 90 seconds. Built for podcasters,
+              streamers, and the teams behind them.
             </p>
           </div>
           {columns.map((col) => (

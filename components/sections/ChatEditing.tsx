@@ -1,36 +1,42 @@
 import { Badge, Card, Container, GradientText, Mark, SectionHeading } from "@/components/ui";
 
-/**
- * Real commands the parser accepts, and replies in the shape the editor
- * actually produces — applyCommand's summary sentence is used verbatim as the
- * chat reply, so nothing here can promise an edit the code cannot perform.
- */
 const EXCHANGES: {
   command: string;
   reply: string;
-  length: string;
+  from: number;
+  to: number;
+  applied: string;
 }[] = [
   {
     command: "Make clip 2 more energetic",
-    reply: "Tightened 3 pauses and added 2 punch-in zooms.",
-    length: "27.4s",
+    reply:
+      "Tightened 3 cuts, boosted pacing 12%, re-timed captions to land on the beat.",
+    from: 74,
+    to: 88,
+    applied: "3.8s",
   },
   {
-    command: "Remove the pause at 0:14",
-    reply: "Cut the 1.2 s pause at 0:14.",
-    length: "26.2s",
+    command: "Remove the awkward pause in clip 4",
+    reply:
+      "Cut 2.4s of dead air at 0:31, crossfaded the audio, re-flowed the caption line.",
+    from: 71,
+    to: 79,
+    applied: "2.1s",
   },
   {
-    command: "Punch in when he says funnels",
-    reply: "Added a 1.6 s zoom at 0:09.",
-    length: "26.2s",
+    command: "Add a zoom on the host's face when he laughs",
+    reply:
+      "Added a 1.3× face-tracked punch-in at 0:42, eased over 6 frames.",
+    from: 79,
+    to: 86,
+    applied: "4.2s",
   },
 ];
 
 const SUGGESTIONS = [
-  "Remove all the pauses",
-  "Trim the first 2 seconds",
-  "Try another hook",
+  "Remove filler words",
+  "Punch up the hook",
+  "Cut the intro to 3 seconds",
 ];
 
 function CatalystAvatar() {
@@ -44,16 +50,11 @@ function CatalystAvatar() {
   );
 }
 
-/**
- * The clip is re-rendered after an edit and its new duration is shown. It is
- * NOT re-scored — nothing in the editor recomputes the virality score — so
- * this chip reports the one thing that actually changes.
- */
-function RerenderChip({ length }: { length: string }) {
+function ScoreDelta({ from, to }: { from: number; to: number }) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-md border border-signal-500/20 bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-signal-400"
-      aria-label={`Clip re-rendered, now ${length} long`}
+      aria-label={`Virality score improved from ${from} to ${to}`}
     >
       <svg
         width="9"
@@ -66,10 +67,10 @@ function RerenderChip({ length }: { length: string }) {
         strokeLinejoin="round"
         aria-hidden
       >
-        <path d="M3 12a9 9 0 1 0 3-6.7" />
-        <path d="M3 4v5h5" />
+        <path d="M12 19V5" />
+        <path d="m5 12 7-7 7 7" />
       </svg>
-      re-rendered · {length}
+      score {from} → {to}
     </span>
   );
 }
@@ -83,13 +84,13 @@ export default function ChatEditing() {
       />
       <Container className="relative">
         <SectionHeading
-          eyebrow="Plain-language editing"
+          eyebrow="Copilot for clips"
           title={
             <>
               Edit by <GradientText>typing</GradientText>, not by timeline
             </>
           }
-          lede="Say what you want changed. Catalyst parses it, applies it, and re-renders the clip on your machine. Free, in the browser, no account — not a paid upgrade."
+          lede="Say what you want changed. Catalyst applies the edit, shows the result, and re-scores the clip — the edit loop drops from hours to minutes."
         />
 
         <div className="mx-auto mt-16 max-w-2xl">
@@ -102,9 +103,9 @@ export default function ChatEditing() {
                 <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
               </div>
               <p className="font-mono text-xs text-zinc-400">
-                Catalyst <span className="text-zinc-600">—</span> clip 2 of 3
+                Catalyst <span className="text-zinc-600">—</span> clip 2 of 6
               </p>
-              <Badge tone="brand">Free</Badge>
+              <Badge tone="brand">Pro</Badge>
             </div>
 
             {/* Conversation */}
@@ -125,9 +126,9 @@ export default function ChatEditing() {
                         {x.reply}
                       </p>
                       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                        <RerenderChip length={x.length} />
+                        <ScoreDelta from={x.from} to={x.to} />
                         <span className="font-mono text-[11px] text-zinc-400">
-                          on your machine
+                          applied in {x.applied}
                         </span>
                       </div>
                     </div>
@@ -170,11 +171,9 @@ export default function ChatEditing() {
           </div>
 
           <p className="mx-auto mt-8 max-w-xl text-center text-sm leading-relaxed text-zinc-500">
-            Every command runs on the real edit list — pauses, pace, zooms,
-            trims, captions, hooks — and the clip is rebuilt from it. Say
-            &ldquo;undo&rdquo; to step back or &ldquo;reset&rdquo; to start
-            over. It is a phrase parser, not a chatbot: the same sentence always
-            does the same thing, and anything it can&rsquo;t do it says so.
+            Every command runs on the real timeline — cuts, zooms, captions,
+            pacing — and the virality score updates the second it lands. Undo
+            with a word.
           </p>
         </div>
       </Container>

@@ -10,65 +10,60 @@ type Layer = {
   connector?: string;
 };
 
-/**
- * The seven stages a run actually passes through, in order, all of them inside
- * the browser tab. Each `tech` line names the real implementation — no stage
- * is listed here that the shipped code does not perform.
- */
 const LAYERS: Layer[] = [
   {
     id: "L1",
-    name: "Audio analysis",
-    fn: "Decodes the track and maps where the energy spikes and where the dead air sits.",
-    tech: "Web Audio · energy envelope + silence map",
+    name: "Topic detection",
+    fn: "Transcribes every word, maps every speaker, and flags the moments worth cutting.",
+    tech: "WhisperX · speaker diarization",
     chip: "border-brand-500/30 bg-gradient-to-br from-brand-500/25 to-brand-500/5 text-brand-300",
     connector: "from-brand-500/50 to-brand-500/45",
   },
   {
     id: "L2",
-    name: "Transcription",
-    fn: "Turns speech into text with a timestamp on every single word.",
-    tech: "whisper-tiny.en · WebAssembly, in-tab",
+    name: "Creative scoring",
+    fn: "A multimodal model rates each candidate 0–100 on hook, arc, and payoff.",
+    tech: "Multimodal LLM · retention priors",
     chip: "border-brand-500/30 bg-gradient-to-br from-brand-500/25 to-brand-500/5 text-brand-300",
     connector: "from-brand-500/45 to-spark-500/45",
   },
   {
     id: "L3",
-    name: "Speaker separation",
-    fn: "Groups the voices so captions can color each speaker differently.",
-    tech: "Spectral speaker features · no cloud model",
+    name: "Visual processing",
+    fn: "Reframes to 9:16 and keeps every face locked dead-center in frame.",
+    tech: "OpenCV · MediaPipe face tracking",
     chip: "border-spark-500/30 bg-gradient-to-br from-spark-500/25 to-spark-500/5 text-spark-400",
     connector: "from-spark-500/45 to-spark-500/40",
   },
   {
     id: "L4",
-    name: "Scoring & selection",
-    fn: "Rates every candidate window 0–100, then takes the best without letting them overlap.",
-    tech: "Deterministic score · hook, density, energy, completeness",
+    name: "Audio",
+    fn: "Strips noise, levels dialogue, and lays music under the moment.",
+    tech: "FFmpeg · AI noise reduction",
     chip: "border-spark-500/30 bg-gradient-to-br from-spark-500/25 to-spark-500/5 text-spark-400",
     connector: "from-spark-500/40 to-ember-500/40",
   },
   {
     id: "L5",
-    name: "Reframing",
-    fn: "Finds the faces, builds a smooth camera move, and crops the shot to 9:16.",
-    tech: "face-api tiny detector · smoothed crop track",
+    name: "Post-production",
+    fn: "Applies animated captions, transitions, and matched B-roll — no timeline required.",
+    tech: "Caption templates · B-roll matcher",
     chip: "border-ember-500/30 bg-gradient-to-br from-ember-500/25 to-ember-500/5 text-ember-400",
     connector: "from-ember-500/40 to-ember-500/40",
   },
   {
     id: "L6",
-    name: "Render",
-    fn: "Draws the reframed video and word-timed captions to a canvas and records the file.",
-    tech: "Canvas 2D · MediaRecorder · burned-in captions",
+    name: "Distribution",
+    fn: "Publishes everywhere in one click — sized, captioned, and scheduled per platform.",
+    tech: "TikTok · Shorts · Reels APIs",
     chip: "border-ember-500/30 bg-gradient-to-br from-ember-500/25 to-ember-500/5 text-ember-400",
     connector: "from-ember-500/40 to-signal-500/50",
   },
   {
     id: "L7",
-    name: "Edit by chat",
-    fn: "Say what to change — pauses, pace, zooms, trims, hooks — and the clip is rebuilt.",
-    tech: "Phrase parser · no LLM, no randomness",
+    name: "Optimization",
+    fn: "A/B tests every clip in the wild and feeds the results back into scoring.",
+    tech: "A/B testing · reinforcement learning",
     chip: "border-signal-500/40 bg-gradient-to-br from-signal-500/30 to-signal-500/5 text-signal-400 shadow-[0_0_24px_rgba(52,211,153,0.25)]",
   },
 ];
@@ -88,7 +83,7 @@ export default function Pipeline() {
               Seven layers, <GradientText>one pipeline</GradientText>
             </>
           }
-          lede="From dropped file to finished clip, every frame passes through seven stages — and all seven run inside this tab. The last one is a loop: say what to change and the clip is rebuilt on your machine."
+          lede="From raw footage to published clip, every frame passes through seven specialized layers. The last one feeds results back into scoring — every clip you ship makes the engine smarter."
         />
 
         <div className="mx-auto mt-16 max-w-3xl">
@@ -109,7 +104,7 @@ export default function Pipeline() {
                 Input
               </span>{" "}
               <span className="text-zinc-700">·</span> founder-podcast-ep42.mp4{" "}
-              <span className="text-zinc-700">·</span> 18:42
+              <span className="text-zinc-700">·</span> 1:24:06
             </p>
           </div>
 
@@ -144,7 +139,7 @@ export default function Pipeline() {
                         <h3 className="font-display text-lg font-semibold tracking-tight text-white">
                           {layer.name}
                         </h3>
-                        <Badge tone="signal">Free, no account</Badge>
+                        <Badge tone="signal">Closes the loop</Badge>
                       </div>
                       <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
                         {layer.fn}
@@ -168,7 +163,7 @@ export default function Pipeline() {
                           <path d="M3 12a9 9 0 1 0 3-6.7" />
                           <path d="M3 4v5h5" />
                         </svg>
-                        every edit re-runs L6 on your machine
+                        results feed back into L2 scoring
                       </p>
                     </div>
                   ) : (

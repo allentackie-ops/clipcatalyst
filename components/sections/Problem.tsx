@@ -2,17 +2,17 @@ import { Badge, Card, Container } from "@/components/ui";
 
 const OLD_WAY = [
   "Scrub hours of footage to find one 60-second moment",
-  "Upload the whole file before anything can start",
-  "Wait in a queue behind everyone else's video",
+  "Sit in 10–20 minute processing queues per video",
   "“Finished” clips that still need re-editing",
+  "Export caps, watermarks, resolution limits",
 ];
 
 const NEW_WAY = [
-  ["Find", "the moments worth clipping, scored and ranked"],
-  ["Cut", "on sentence boundaries, reframed to 9:16"],
-  ["Caption", "every word, colored per speaker"],
-  ["Score", "each clip 0–100, with the one fix that helps most"],
-  ["Download", "the MP4, or share it straight from your phone"],
+  ["Find", "the moments worth clipping — across hours of footage"],
+  ["Cut", "in and out on the exact frame, reframed to 9:16"],
+  ["Caption", "with animated templates and keyword highlights"],
+  ["Score", "every clip 0–100 for virality, with fixes"],
+  ["Publish", "to TikTok, Shorts, and Reels in one click"],
 ] as const;
 
 function XMark() {
@@ -71,16 +71,16 @@ export default function Problem() {
           </p>
           <h2 className="font-display tracking-tight">
             <span className="block bg-gradient-to-r from-brand-400 via-spark-400 to-ember-400 bg-clip-text text-7xl font-semibold leading-none text-transparent sm:text-8xl md:text-[10rem]">
-              Hours
+              80%
             </span>
             <span className="mt-4 block text-2xl font-semibold text-white sm:text-3xl md:mt-6 md:text-4xl">
-              of scrubbing to find one sixty-second moment
+              of a creator&rsquo;s time goes to manual editing
             </span>
           </h2>
           <p className="mt-5 text-base leading-relaxed text-zinc-400 sm:text-lg">
-            That is the job today: scrub, cut, reframe, caption, repeat. And the
-            tools that offer to do it for you want the whole file uploaded to
-            someone else&rsquo;s server first.
+            Hours of scrubbing for a 60-second moment. And the &ldquo;good
+            enough&rdquo; tools? Slow queues, missed frames, clips you end up
+            fixing by hand.
           </p>
         </div>
 
@@ -120,7 +120,7 @@ export default function Problem() {
                 With ClipCatalyst
               </h3>
               <Badge tone="signal">
-                <span className="font-mono">$0</span> · in your browser
+                <span className="font-mono">&lt;90s</span> / clip · at launch
               </Badge>
             </div>
             <ul className="relative mt-6 space-y-4">

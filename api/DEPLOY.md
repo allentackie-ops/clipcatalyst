@@ -73,6 +73,19 @@ baked in **at build time**:
 NEXT_PUBLIC_CLOUD_API=https://your-box.example.com npm run build
 ```
 
+Sign in with Google is baked in the same way, and the two ids must be the same
+OAuth client:
+
+```bash
+NEXT_PUBLIC_CLOUD_API=https://your-box.example.com \
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=<the same value as CC_GOOGLE_CLIENT_ID> \
+npm run build
+```
+
+Leave it unset and the Google button never renders — Google's script is never
+even fetched — while email and password carry on unchanged. (On GitHub Pages
+both come from repository variables: `CLOUD_API` and `GOOGLE_CLIENT_ID`.)
+
 Two things must line up:
 
 - `CC_CORS_ORIGINS` must include `https://allentackie-ops.github.io` — the

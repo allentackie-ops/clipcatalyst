@@ -220,6 +220,9 @@ def test_register_login_logout_me_round_trip(sandbox: SimpleNamespace) -> None:
         "email": "creator@example.com",
         "plan": "free",
         "plan_status": "",
+        # Registered with a password and nothing else; Sign in with Google
+        # adds "google" to this list (LIBRARY.md Part 1, test_google_auth.py).
+        "auth_methods": ["password"],
         "quota": {"limit": 3, "used": 0, "month": month},
         "entitlements": {
             "max_height": 1280,
@@ -228,6 +231,10 @@ def test_register_login_logout_me_round_trip(sandbox: SimpleNamespace) -> None:
             # Free carries no brand kit — its own promise, not the inverse of
             # the watermark (BRANDKIT.md §3a; test_brandkit.py owns the rest).
             "brand_kit": False,
+            # How long a saved clip's FILE is kept (LIBRARY.md Part 2). The
+            # account page says it out loud from here, so the line on screen is
+            # the window the reaper enforces; test_library.py owns the rest.
+            "retention_days": 7,
         },
         # A fresh account has never opened the panel: no logo, no colour, and
         # showLogo on — the EMPTY_KIT the browser starts from.
@@ -535,6 +542,7 @@ def test_me_reports_usage_and_effective_plan(sandbox: SimpleNamespace) -> None:
         "watermark_required": False,
         "clips_per_month": 30,
         "brand_kit": True,  # promised from Starter up (BRANDKIT.md)
+        "retention_days": 30,  # Starter keeps clips a month (LIBRARY.md)
     }
 
     # Canceled keeps the stored plan name but entitles as free.

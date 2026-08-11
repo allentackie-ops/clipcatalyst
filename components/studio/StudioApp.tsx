@@ -16,6 +16,7 @@ import StudioDropzone from "./StudioDropzone";
 import StageChecklist from "./StageChecklist";
 import ClipCard from "./ClipCard";
 import ResultsView from "./ResultsView";
+import SaveToLibraryButton from "./SaveToLibraryButton";
 import {
   DEFAULT_SETTINGS,
   formatBytes,
@@ -881,6 +882,21 @@ export default function StudioApp() {
                 Rendered on your ClipCatalyst server · MP4
                 {watermarkRequired ? " · includes the beta watermark" : ""}
               </p>
+              {/* Cloud clips are already in the library — the server wrote
+                  their rows as it rendered them, so there is nothing here to
+                  upload (that button belongs to browser clips). */}
+              {user !== null ? (
+                <p className="mt-2 text-center text-xs text-zinc-500">
+                  These clips are saved to{" "}
+                  <Link
+                    href="/account"
+                    className="rounded text-brand-300 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                  >
+                    your library
+                  </Link>
+                  .
+                </p>
+              ) : null}
             </div>
           ) : cloudState.status === "error" ? (
             <div className="animate-rise">
@@ -956,6 +972,16 @@ export default function StudioApp() {
                 brandKit={state.brandKit}
                 failedCount={state.failedCount}
                 onReset={handleReset}
+                renderSaveAction={(clip, i) => (
+                  // Keyed on the file: baking in an edit produces a NEW clip,
+                  // which has not been saved just because its predecessor was.
+                  <SaveToLibraryButton
+                    key={clip.url}
+                    clip={clip}
+                    index={i}
+                    height={state.renderOptions.height}
+                  />
+                )}
               />
             </div>
           ) : (

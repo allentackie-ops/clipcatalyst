@@ -104,7 +104,17 @@ def verify_password(password: str, stored: str) -> bool:
     them until then would lock existing users out of their own accounts. An
     already-normalized password (every ASCII one) still runs exactly one
     scrypt, so the common path costs nothing.
+
+    An EMPTY `stored` is refused before anything is parsed or compared. That
+    is a password-less account — one created by Sign in with Google, whose
+    row carries ``password_hash = ''`` (LIBRARY.md Part 1) — and the empty
+    string is not a hash of anything, least of all of the empty password.
+    Parsing would reject it anyway (``"".split("$")`` cannot unpack), but
+    "no password set means no password login" is a rule this function states
+    rather than a behaviour that falls out of an exception somewhere else.
     """
+    if not stored:
+        return False
     try:
         algorithm, n_s, r_s, p_s, salt_b64, hash_b64 = stored.split("$")
         if algorithm != "scrypt":

@@ -31,6 +31,11 @@ export type AccountUser = {
   plan_status: string;
   /** limit null = unlimited. */
   quota: { limit: number | null; used: number; month: string };
+  /** How this account can be signed into: ["password"], ["google"], or both
+   *  (LIBRARY.md Part 1). Optional so a server from before Google sign-in
+   *  still parses; absent means "the server didn't say", which the UI treats
+   *  as nothing to show rather than as "no way in". */
+  auth_methods?: string[];
   entitlements: {
     max_height: number;
     watermark_required: boolean;
@@ -40,6 +45,12 @@ export type AccountUser = {
      *  different one that merely lines up today (BRANDKIT.md). Optional so a
      *  server from before brand kits still parses. */
     brand_kit?: boolean;
+    /** How long a saved clip's FILE is kept, in days; null = forever. The
+     *  three states are all distinct and the retention line reads all three:
+     *  a number is a deadline, null is "kept as long as the account is", and
+     *  `undefined` is a server from before the library that has not made a
+     *  promise at all — so the UI stays quiet rather than inventing one. */
+    retention_days?: number | null;
   };
   /** The kit stored server-side. Present whatever the plan says — a kit
    *  outlives a downgrade — so `entitlements.brand_kit` is what decides
@@ -150,6 +161,23 @@ export async function login(email: string, password: string): Promise<void> {
   setToken(res.token);
 }
 
+/**
+ * POST /v1/auth/google — trade a Google ID token for a session (stores it).
+ *
+ * Identity only, never publishing (LIBRARY.md Part 1): Google says who this
+ * is, and what comes back is the same session `/v1/auth/login` mints. The
+ * token itself is believed by nobody here — the server verifies its signature
+ * against Google's keys, its `aud`, and `email_verified` before it counts.
+ * 503 means the server has no `CC_GOOGLE_CLIENT_ID`; the button that produced
+ * this token shouldn't have rendered, so the caller surfaces it verbatim.
+ */
+export async function signInWithGoogle(idToken: string): Promise<void> {
+  const res = await request<AuthResponse>("/v1/auth/google", {
+    body: { id_token: idToken },
+  });
+  setToken(res.token);
+}
+
 /** POST /v1/auth/logout — revokes the session server-side, forgets it
  *  locally either way (offline or already-expired still signs out here). */
 export async function logout(): Promise<void> {
@@ -250,6 +278,272 @@ export async function fetchBrandLogo(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ---- The clip library (LIBRARY.md Part 2) ----
+// Two lifetimes in one row, and every type below keeps them apart: the
+// metadata is permanent, the FILE expires. `available` and `url` describe the
+// file and nothing else — a card whose retention window has closed still has
+// its title, score and hooks, which is why the library UI can show one
+// without ever reaching for a player.
+
+/** One transcript word on a saved clip (ClipWordOut in models.py). Times are
+ *  relative to the clip's own start, not the source video's. */
+export type ClipWord = {
+  text: string;
+  start: number;
+  end: number;
+  /** Diarized speaker index; null = unknown (JSON's spelling of absent). */
+  speaker?: number | null;
+};
+
+/** A saved clip as `GET /v1/clips` reports it (ClipSummaryOut). */
+export type LibraryClip = {
+  id: string;
+  /** '' for a browser clip — nothing was rendered on our hardware. */
+  job_id: string;
+  clip_index: number;
+  title: string;
+  score: number;
+  hooks: string[];
+  reason: string;
+  tip: string;
+  /** Seconds into the source video the clip was cut from. */
+  start: number;
+  end: number;
+  duration: number;
+  width: number;
+  height: number;
+  speaker_count: number;
+  /** "cloud" (rendered on the server) | "browser" (uploaded on purpose). */
+  engine: string;
+  bytes: number;
+  created_at: string;
+  /** When the FILE goes; null = never (an unlimited plan). The row has no
+   *  expiry of its own — deleting it is the owner's decision alone. */
+  expires_at: string | null;
+  /** Is the video still here? Everything above is here regardless. */
+  available: boolean;
+  /** Only when available. May be relative (resolved against CLOUD_API), our
+   *  API's own absolute url, or a presigned link at the storage bucket. */
+  url: string | null;
+};
+
+/** One clip in full — the transcript is the half that outlives the file
+ *  (`GET /v1/clips/{id}`, and what an upload hands back). */
+export type LibraryClipDetail = LibraryClip & { words: ClipWord[] };
+
+/** One page of the library, newest first. `next_before` is opaque: hand it
+ *  straight back as `before` for the next page; null = the end. */
+export type ClipPage = { clips: LibraryClip[]; next_before: string | null };
+
+/** Page size for the library grid. The server's own ceiling is 50; this is
+ *  a few rows of cards, which is what a "load more" is for. */
+export const CLIPS_PAGE_SIZE = 24;
+
+/**
+ * GET /v1/clips — this account's clips, newest first.
+ *
+ * `before` is the previous page's `next_before` and nothing else: the cursor
+ * is the server's business (it carries a timestamp AND an id, because one
+ * render writes several clips in the same millisecond), so this never builds
+ * or parses one.
+ */
+export function listClips(
+  before?: string | null,
+  limit: number = CLIPS_PAGE_SIZE
+): Promise<ClipPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set("before", before);
+  return request<ClipPage>(`/v1/clips?${params.toString()}`, {
+    method: "GET",
+    auth: true,
+  });
+}
+
+/** DELETE /v1/clips/{id} — the row AND the file, the one thing that removes a
+ *  library row for good. Retention only ever takes the file. */
+export async function deleteClip(id: string): Promise<void> {
+  await request<{ ok: boolean }>(`/v1/clips/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    auth: true,
+  });
+}
+
+/** The metadata part of an upload — the card the browser already holds.
+ *  Nothing here is trusted for anything but display: the server forces
+ *  `engine`, measures the bytes itself, and takes the expiry from the plan. */
+export type ClipUploadMetadata = {
+  title: string;
+  score: number;
+  hooks: string[];
+  reason: string;
+  tip: string;
+  start: number;
+  end: number;
+  duration: number;
+  width: number;
+  height: number;
+  speaker_count: number;
+  clip_index: number;
+  words: ClipWord[];
+};
+
+/**
+ * POST /v1/clips/upload — save a clip the BROWSER rendered.
+ *
+ * Only ever called from a click (LIBRARY.md's non-negotiable: never on a
+ * timer, never on completion, never behind a pre-ticked box), because the
+ * site's promise is that the video stays on the device unless its owner says
+ * otherwise.
+ *
+ * XMLHttpRequest rather than fetch for the same reason cloud.ts's
+ * `uploadSource` uses it: only XHR reports real upload progress, and a
+ * hundred-megabyte upload with no progress is indistinguishable from a hang.
+ * The browser's own multipart encoder sets the Content-Length the route
+ * requires. A failure rejects and changes nothing — the local file is
+ * untouched, so the caller can offer the click again.
+ */
+export function uploadClip(
+  file: Blob,
+  filename: string,
+  metadata: ClipUploadMetadata,
+  onProgress?: (fraction: number) => void
+): Promise<LibraryClipDetail> {
+  return new Promise((resolve, reject) => {
+    const token = getToken();
+    if (token === null) {
+      reject(
+        new AccountError(
+          "You're signed out — sign in to save clips to your library.",
+          401
+        )
+      );
+      return;
+    }
+    const form = new FormData();
+    // The name rides on the part, so no File constructor is needed (and a
+    // Blob straight from the renderer works unchanged).
+    form.append("file", file, filename);
+    form.append("metadata", JSON.stringify(metadata));
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${CLOUD_API}/v1/clips/upload`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      // FastAPI errors arrive as {detail: "..."} — surface them when present.
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText) as unknown;
+      } catch {
+        // Non-JSON body; fall through to the status-code message.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body !== null) {
+        onProgress?.(1);
+        resolve(body as LibraryClipDetail);
+        return;
+      }
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      // Same rule as request(): a 401 on an authenticated call means the
+      // session is gone, so every consumer should agree we're signed out.
+      if (xhr.status === 401) setToken(null);
+      reject(
+        new AccountError(
+          typeof detail === "string" && detail
+            ? detail
+            : `Saving that clip failed (${xhr.status}).`,
+          xhr.status
+        )
+      );
+    };
+    xhr.onerror = () =>
+      reject(
+        new AccountError(
+          "Couldn't reach the ClipCatalyst server — the clip is still on your device.",
+          0
+        )
+      );
+    xhr.onabort = () =>
+      reject(new AccountError("Saving that clip was canceled.", 0));
+    xhr.send(form);
+  });
+}
+
+/**
+ * True for a url that points at OUR API — the only place the session bearer
+ * belongs. Relative urls always do; an absolute one only when it starts with
+ * the configured API origin, so a presigned link at the storage bucket never
+ * sees the token (it carries its own auth in the query string, and SigV4
+ * rejects a request that arrives with a second Authorization header anyway).
+ */
+function isApiUrl(url: string): boolean {
+  if (!/^https?:\/\//.test(url)) return true;
+  return CLOUD_API !== "" && url.startsWith(`${CLOUD_API}/`);
+}
+
+/** A playable source for a saved clip. `objectUrl` says who owns it: true
+ *  means the caller minted it and must revoke it when the player goes.
+ *  `mimeType` is the container the server actually served ("" when the bytes
+ *  never passed through us), so a download can be named honestly instead of
+ *  guessed at. */
+export type ClipSource = {
+  url: string;
+  objectUrl: boolean;
+  mimeType: string;
+};
+
+/**
+ * Resolve a saved clip into something a `<video>` can play.
+ *
+ * `/v1/clips/{id}/file` is owner-only and `<video src>` cannot send headers,
+ * so our own files are fetched with the session and served from an object URL
+ * — the same trick cloud.ts plays for a signed-in job's clips. A presigned
+ * bucket url needs none of that and is handed back as-is.
+ *
+ * Never called for an expired clip: the card shows the Expired state instead
+ * of a player, which is the whole point of `available`.
+ */
+export async function loadClipSource(clip: LibraryClip): Promise<ClipSource> {
+  const raw = clip.url ?? "";
+  if (!clip.available || raw === "") {
+    throw new AccountError(
+      "That clip's video has expired — its card is still here.",
+      404
+    );
+  }
+  const url = /^https?:\/\//.test(raw) ? raw : `${CLOUD_API}${raw}`;
+  if (!isApiUrl(raw)) return { url, objectUrl: false, mimeType: "" };
+  const token = getToken();
+  if (token === null) {
+    throw new AccountError("You're signed out — sign in to play this clip.", 401);
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new AccountError(
+      "Couldn't reach the ClipCatalyst server — check your connection and try again.",
+      0
+    );
+  }
+  if (!res.ok) {
+    if (res.status === 401) setToken(null);
+    throw new AccountError(
+      res.status === 404
+        ? "That clip's video is no longer on the server."
+        : `Couldn't load that clip (${res.status}).`,
+      res.status
+    );
+  }
+  const blob = await res.blob();
+  return {
+    url: URL.createObjectURL(blob),
+    objectUrl: true,
+    mimeType: blob.type,
+  };
 }
 
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);

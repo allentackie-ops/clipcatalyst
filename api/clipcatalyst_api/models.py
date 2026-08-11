@@ -92,6 +92,18 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class GoogleAuthRequest(BaseModel):
+    """``POST /v1/auth/google`` — the ID token from Google Identity Services.
+
+    A JWT, and nothing about it is believed until it has been verified
+    against Google's key set (googleid.py). The max_length is a parser guard,
+    not a credential check: real ID tokens are around a kilobyte, and every
+    substantive refusal is the same 401.
+    """
+
+    id_token: str = Field(min_length=1, max_length=8192)
+
+
 class AuthUserOut(BaseModel):
     id: str
     email: str
@@ -122,6 +134,11 @@ class EntitlementsOut(BaseModel):
     # colour. Its own promise, never inferred from watermark_required — the
     # panel shows the upsell off THIS field.
     brand_kit: bool = False
+    # How long a saved clip's FILE is kept; None = forever (LIBRARY.md Part 2).
+    # The account page says this out loud, and says it from here rather than
+    # from a table in the frontend, so the promise on screen is the one the
+    # reaper actually enforces.
+    retention_days: int | None = None
 
 
 class BrandKitRequest(BaseModel):
@@ -153,9 +170,105 @@ class MeResponse(BaseModel):
     email: str
     plan: str
     plan_status: str
+    # How this account can be signed into: ["password"], ["google"], or both
+    # (LIBRARY.md Part 1). The account page reads it to say so out loud, and
+    # to never offer "change password" on a password-less account.
+    auth_methods: list[str] = Field(default_factory=list)
     quota: QuotaOut
     entitlements: EntitlementsOut
     brand: BrandKitOut = Field(default_factory=BrandKitOut)
+
+
+# --------------------------------------------------------------------------- #
+# The clip library (LIBRARY.md Part 2). Two lifetimes in one row: the metadata
+# is permanent, the file expires — so `available` and `url` describe the FILE,
+# and everything else survives it.
+# --------------------------------------------------------------------------- #
+
+
+class ClipWordOut(BaseModel):
+    """One transcript word, re-based to the clip's start. Mirrors
+    ``TranscriptWord`` in lib/studio/types.ts."""
+
+    text: str
+    start: float
+    end: float
+    speaker: int | None = None
+
+
+class ClipSummaryOut(BaseModel):
+    """A library clip as the grid sees it — everything but the transcript."""
+
+    id: str
+    job_id: str = ""  # '' for a browser clip: nothing was rendered on our box
+    clip_index: int = 0
+    title: str = ""
+    score: int = Field(default=0, ge=0, le=100)
+    hooks: list[str] = Field(default_factory=list)
+    reason: str = ""
+    tip: str = ""
+    start: float = 0.0
+    end: float = 0.0
+    duration: float = 0.0
+    width: int = 0
+    height: int = 0
+    speaker_count: int = 0
+    engine: str = "cloud"  # "cloud" | "browser"
+    bytes: int = 0
+    created_at: str
+    # When the FILE goes; None = never (an unlimited plan). The row itself has
+    # no expiry — the card keeps showing title, score and hooks afterwards.
+    expires_at: str | None = None
+    # Is the video still here? Everything above is here regardless.
+    available: bool = False
+    # Only when available — a card with a url that 404s is the broken player
+    # LIBRARY.md's non-negotiables rule out.
+    url: str | None = None
+
+
+class ClipDetailOut(ClipSummaryOut):
+    """One clip in full, transcript included (``GET /v1/clips/{id}``)."""
+
+    words: list[ClipWordOut] = Field(default_factory=list)
+
+
+class ClipListResponse(BaseModel):
+    clips: list[ClipSummaryOut] = Field(default_factory=list)
+    # Feed back as `?before=` for the next page; None = the end of the library.
+    # Opaque on purpose: it is the last item's created_at plus its id, because
+    # clips from one render share a timestamp and a cursor that could not tell
+    # them apart would drop the rest of the group at a page boundary.
+    next_before: str | None = None
+
+
+class ClipUploadRequest(BaseModel):
+    """The JSON metadata part of ``POST /v1/clips/upload``.
+
+    A browser clip's card, as the Studio already holds it. Nothing here is
+    trusted for anything but display: `engine` is forced to "browser" by the
+    route, the expiry comes from the account's plan, and the byte count comes
+    from the file we actually stored — never from this payload.
+    """
+
+    title: str = Field(default="", max_length=300)
+    score: int = Field(default=0, ge=0, le=100)
+    hooks: list[str] = Field(default_factory=list, max_length=10)
+    reason: str = Field(default="", max_length=1000)
+    tip: str = Field(default="", max_length=1000)
+    start: float = Field(default=0.0, ge=0)
+    end: float = Field(default=0.0, ge=0)
+    duration: float = Field(default=0.0, ge=0)
+    width: int = Field(default=0, ge=0, le=8192)
+    height: int = Field(default=0, ge=0, le=8192)
+    speaker_count: int = Field(default=0, ge=0, le=64)
+    clip_index: int = Field(default=0, ge=0, le=1000)
+    # A 60 s clip is ~200 words; the ceiling is a parser guard, not a limit
+    # anybody should ever meet.
+    words: list[ClipWordOut] = Field(default_factory=list, max_length=5000)
+
+
+class ClipDeletedResponse(BaseModel):
+    ok: bool = True
 
 
 class CheckoutRequest(BaseModel):

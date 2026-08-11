@@ -70,6 +70,17 @@ class Settings:
     stripe_price_pro: str = ""
     stripe_price_enterprise: str = ""
     frontend_origin: str = "http://localhost:3000"  # checkout/portal return URLs
+    # Sign in with Google (LIBRARY.md Part 1): the OAuth client id every ID
+    # token must name as its `aud`. Empty is the honest off switch — the
+    # endpoint 503s and the frontend renders no button.
+    google_client_id: str = ""
+    # The clip library (LIBRARY.md Part 2). One saved browser clip may not
+    # exceed max_clip_bytes, and one account's stored clip FILES may not
+    # exceed library_max_bytes in total — that second ceiling is what stops a
+    # free account being used as a disk, since saving a browser clip costs no
+    # monthly quota (nothing rendered on our hardware).
+    max_clip_bytes: int = 200_000_000  # 200 MB
+    library_max_bytes: int = 5_000_000_000  # 5 GB per account
 
     @property
     def uploads_dir(self) -> Path:
@@ -88,6 +99,17 @@ class Settings:
         """Uploaded brand logos, one file per account (see brandkit.py)."""
         return self.data_dir / "brand"
 
+    @property
+    def library_dir(self) -> Path:
+        """Saved clips (LIBRARY.md Part 2), keyed by account.
+
+        Deliberately NOT under ``clips_dir``. Both the job reaper and the
+        lost-claim cleanup ``rmtree(clips_dir / job_id)``, and a library file
+        living in there would be deleted by a sweep that knows nothing about
+        the library. Separate roots make that impossible rather than careful.
+        """
+        return self.data_dir / "library"
+
     def ensure_dirs(self) -> None:
         for d in (
             self.data_dir,
@@ -95,6 +117,7 @@ class Settings:
             self.clips_dir,
             self.tmp_dir,
             self.brand_dir,
+            self.library_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
 
@@ -227,4 +250,7 @@ def get_settings() -> Settings:
         frontend_origin=os.environ.get(
             "CC_FRONTEND_ORIGIN", "http://localhost:3000"
         ).rstrip("/"),
+        google_client_id=os.environ.get("CC_GOOGLE_CLIENT_ID", "").strip(),
+        max_clip_bytes=int(os.environ.get("CC_MAX_CLIP_BYTES", "200000000")),
+        library_max_bytes=int(os.environ.get("CC_LIBRARY_MAX_BYTES", "5000000000")),
     )

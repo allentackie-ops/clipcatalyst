@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -12,9 +13,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import stripe
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
 # The form parser builds Starlette's UploadFile; FastAPI's is a SUBCLASS used
@@ -22,7 +23,7 @@ from pydantic import ValidationError
 # misses every part of a hand-parsed form (and quietly cleared the logo).
 from starlette.datastructures import UploadFile
 
-from . import auth, billing, brandkit, db
+from . import auth, billing, brandkit, db, googleid
 from .models import (
     AuthResponse,
     AuthUserOut,
@@ -30,10 +31,17 @@ from .models import (
     BrandKitRequest,
     CheckoutRequest,
     CheckoutResponse,
+    ClipDeletedResponse,
+    ClipDetailOut,
+    ClipListResponse,
     ClipOut,
+    ClipSummaryOut,
+    ClipUploadRequest,
+    ClipWordOut,
     CreateJobRequest,
     CreateJobResponse,
     EntitlementsOut,
+    GoogleAuthRequest,
     HealthzResponse,
     JobStatusResponse,
     LoginRequest,
@@ -49,8 +57,10 @@ from .models import (
 )
 from .plans import PLANS, effective_plan
 from .settings import Settings, get_settings
-from .storage import get_storage
+from .storage import clip_media_type, get_storage
 from .worker import process_job, reconcile_stalled
+
+logger = logging.getLogger(__name__)
 
 API_VERSION = "0.1.0"
 
@@ -58,6 +68,24 @@ _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 _LOGIN_FAILED = "Incorrect email or password."
+# One generic refusal for every way an ID token can fail (LIBRARY.md Part 1):
+# bad signature, wrong audience or issuer, expired, not yet valid, unknown
+# key, unverified email. Which of them it was is a server-log fact.
+_GOOGLE_SIGN_IN_FAILED = "That Google sign-in couldn't be verified — please try again."
+_GOOGLE_SIGN_IN_OFF = (
+    "Sign in with Google isn't enabled on this server (CC_GOOGLE_CLIENT_ID is "
+    "unset) — sign in with your email and password instead."
+)
+_GOOGLE_KEYS_UNAVAILABLE = (
+    "Google's sign-in keys couldn't be reached just now — please try again in "
+    "a moment."
+)
+# Both halves of a Google sign-in raced: the address was claimed by another
+# account while this request was resolving it. Vanishingly rare, and honest.
+_GOOGLE_ACCOUNT_RACE = (
+    "That account was being changed at the same moment — please try signing in "
+    "again."
+)
 _BILLING_OFF = (
     "Billing isn't enabled on this server yet — plan upgrades will activate "
     "once Stripe is configured."
@@ -87,6 +115,50 @@ _BRAND_BAD_COLOR = (
 _BRAND_MAX_BODY_BYTES = 4_000_000
 
 _DATA_URL_RE = re.compile(r"^data:([^;,]*)((?:;[^;,]*)*),", re.IGNORECASE)
+
+# --- the clip library (LIBRARY.md Part 2) ----------------------------------- #
+
+_CLIP_UNKNOWN = "Unknown clip."
+# The file is gone but the row is not, which is the whole point of the library
+# — so this says so instead of pretending the clip never existed.
+_CLIP_EXPIRED = (
+    "This clip's video has expired and been deleted. Its title, score, hooks "
+    "and transcript are still here."
+)
+_CLIP_NOT_A_VIDEO = (
+    "That file isn't a clip we can store — save the MP4 or WebM the Studio "
+    "rendered."
+)
+_CLIP_UNSUPPORTED_BODY = (
+    "Send the clip as multipart/form-data with a `file` part and a `metadata` "
+    "JSON part."
+)
+_CLIP_BAD_METADATA = "That clip metadata isn't valid JSON."
+# The clip's own bytes are streamed and counted; this is only the JSON card
+# beside them. A 60 s clip's transcript is a few kilobytes.
+_CLIP_METADATA_MAX_BYTES = 256_000
+# Room for the multipart envelope and the metadata part on top of the file
+# itself, so a clip exactly at the limit is not refused by its own boundary.
+_CLIP_BODY_SLACK_BYTES = 1_000_000
+_CLIP_UPLOAD_CHUNK = 1 << 20  # 1 MiB
+
+
+def _sniff_clip_type(head: bytes) -> str | None:
+    """'mp4' | 'webm' read from the bytes themselves, else None.
+
+    The declared content type of an upload is a string the client chose, and
+    what we store gets served back from our own origin — so the container is
+    decided here, from the file's own magic, exactly as brandkit sniffs logos.
+    The Studio's MediaRecorder produces one of these two and nothing else
+    (lib/studio/render.ts).
+    """
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return "mp4"
+    # EBML is Matroska's header too; the DocType right after it is what says
+    # WebM. Requiring it keeps this to the containers a browser really makes.
+    if head[:4] == b"\x1a\x45\xdf\xa3" and b"webm" in head[:64]:
+        return "webm"
+    return None
 
 
 def _rate_limit(request: Request, route: str) -> None:
@@ -160,6 +232,64 @@ def _signed_in(user: dict) -> AuthResponse:
             plan_status=user["plan_status"],
         ),
     )
+
+
+def _auth_methods(user: dict) -> list[str]:
+    """How this account can be signed into (LIBRARY.md Part 1).
+
+    Read off the row itself rather than stored as a flag, so it can never
+    drift from what the two sign-in paths actually accept: a stored password
+    hash is what `/v1/auth/login` needs, a stored `google_sub` is what
+    `/v1/auth/google` matches on. An account with neither — which nothing
+    creates — honestly reports neither.
+    """
+    methods: list[str] = []
+    if str(user.get("password_hash") or ""):
+        methods.append("password")
+    if str(user.get("google_sub") or ""):
+        methods.append("google")
+    return methods
+
+
+def _google_account(identity: googleid.GoogleIdentity) -> dict:
+    """The account behind a verified Google identity: found, linked, or made.
+
+    The order is the whole rule (LIBRARY.md Part 1):
+
+      1. a row already carrying this `google_sub` — sign in;
+      2. a row with this email and no `google_sub` — LINK and sign in. Google
+         having verified the address is the same assurance a password reset
+         would give, which is exactly why an unverified one never reaches
+         here (googleid.verify_id_token refuses it);
+      3. nothing — create a PASSWORD-LESS account (`password_hash = ''`).
+
+    Steps 2 and 3 both race: two first-time sign-ins, or a registration
+    landing between our read and our insert. The database arbitrates — the
+    UNIQUE email and the partial UNIQUE `google_sub` index — so a lost race
+    is re-resolved against whoever won rather than papered over.
+    """
+    for attempt in range(2):
+        user = db.get_user_by_google_sub(identity.sub)
+        if user is not None:
+            return user
+        existing = db.get_user_by_email(identity.email)
+        if existing is not None:
+            if db.link_google_sub(str(existing["id"]), identity.sub):
+                return db.get_user_by_id(str(existing["id"])) or existing
+            # Either this account already carries a DIFFERENT Google identity
+            # or this identity just landed on another row. Re-read once; a
+            # second failure means the email belongs to somebody whose Google
+            # identity is not this one, and that must not sign anybody in.
+            continue
+        created = db.create_user(
+            uuid.uuid4().hex,
+            email=identity.email,
+            password_hash="",
+            google_sub=identity.sub,
+        )
+        if created is not None:
+            return created
+    raise HTTPException(status_code=409, detail=_GOOGLE_ACCOUNT_RACE)
 
 
 # --------------------------------------------------------------------------- #
@@ -332,6 +462,131 @@ async def _read_brand_body(request: Request) -> tuple[bytes | None, str, bool]:
     raise HTTPException(status_code=415, detail=_BRAND_UNSUPPORTED_BODY)
 
 
+# --------------------------------------------------------------------------- #
+# Library shaping. `available` and `url` describe the FILE; everything else on
+# a clip outlives it, so an expired card still carries its title, score, hooks
+# and transcript rather than turning into a broken player.
+# --------------------------------------------------------------------------- #
+
+
+def _clip_fields(settings: Settings, clip: dict) -> dict:
+    available = bool(clip.get("file_path"))
+    return {
+        "id": str(clip["id"]),
+        "job_id": str(clip["job_id"] or ""),
+        "clip_index": int(clip["clip_index"] or 0),
+        "title": str(clip["title"] or ""),
+        "score": int(clip["score"] or 0),
+        "hooks": list(clip["hooks"] or []),
+        "reason": str(clip["reason"] or ""),
+        "tip": str(clip["tip"] or ""),
+        "start": float(clip["start"] or 0.0),
+        "end": float(clip["end"] or 0.0),
+        "duration": float(clip["duration"] or 0.0),
+        "width": int(clip["width"] or 0),
+        "height": int(clip["height"] or 0),
+        "speaker_count": int(clip["speaker_count"] or 0),
+        "engine": str(clip["engine"] or "cloud"),
+        "bytes": int(clip["bytes"] or 0),
+        "created_at": str(clip["created_at"]),
+        # '' is "never" in the row; None is "never" in JSON.
+        "expires_at": str(clip["expires_at"] or "") or None,
+        "available": available,
+        # Relative when public_base_url is empty, exactly like clip and logo
+        # urls: the SPA resolves it against the API origin it already talks to.
+        "url": (
+            f"{settings.public_base_url}/v1/clips/{clip['id']}/file"
+            if available
+            else None
+        ),
+    }
+
+
+def _clip_summary(settings: Settings, clip: dict) -> ClipSummaryOut:
+    return ClipSummaryOut(**_clip_fields(settings, clip))
+
+
+def _clip_detail(settings: Settings, clip: dict) -> ClipDetailOut:
+    """One clip with its transcript — the half that is permanent."""
+    words: list[ClipWordOut] = []
+    for word in clip.get("words") or []:
+        if isinstance(word, dict):
+            try:
+                words.append(ClipWordOut.model_validate(word))
+            except ValidationError:
+                continue  # a word we can't read is not worth a 500
+    return ClipDetailOut(**_clip_fields(settings, clip), words=words)
+
+
+def _format_size(size: int) -> str:
+    """A human size for a refusal — GB past a gigabyte, MB below it."""
+    if size >= 1_000_000_000:
+        value, unit = size / 1_000_000_000, "GB"
+    else:
+        value, unit = size / 1_000_000, "MB"
+    return f"{f'{value:.2f}'.rstrip('0').rstrip('.')} {unit}"
+
+
+def _parse_clip_metadata(raw: object) -> ClipUploadRequest:
+    """The JSON metadata part of a clip upload, as a validated model.
+
+    An absent part is allowed and means "no card": the FILE is the thing being
+    saved, and refusing to store somebody's clip because its title was missing
+    would lose the clip to protect a string.
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return ClipUploadRequest()
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail=_CLIP_BAD_METADATA)
+    if len(raw.encode("utf-8")) > _CLIP_METADATA_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "That clip's metadata is larger than the "
+                f"{_format_size(_CLIP_METADATA_MAX_BYTES)} limit."
+            ),
+        )
+    try:
+        return ClipUploadRequest.model_validate_json(raw)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail=_CLIP_BAD_METADATA) from None
+
+
+def _clip_download_name(clip: dict, extension: str) -> str:
+    """A friendly filename for a downloaded clip.
+
+    Built from the clip's INDEX, never from its title: a title is text the
+    transcript produced, and a filename assembled out of it is a header we
+    would be letting content write.
+    """
+    return f"clip-{int(clip.get('clip_index') or 0) + 1:02d}.{extension}"
+
+
+def _clip_file_response(settings: Settings, clip: dict) -> Response:
+    """Serve a library clip's file, or 404 honestly once it has expired."""
+    file_path = str(clip.get("file_path") or "")
+    if not file_path:
+        raise HTTPException(status_code=404, detail=_CLIP_EXPIRED)
+    storage = get_storage(settings)
+    path = storage.library_clip_file(file_path)
+    if path is not None:
+        media_type = clip_media_type(path.name)
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=_clip_download_name(clip, path.suffix.lstrip(".") or "mp4"),
+            # One account's private video: a shared cache must never keep a
+            # copy, and the browser must revalidate rather than serve one whose
+            # retention window has since closed.
+            headers={"Cache-Control": "private, max-age=0"},
+        )
+    # Nothing local to serve: the backend hands out its own (presigned) link.
+    url = storage.library_clip_url(file_path)
+    if url:
+        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})
+    raise HTTPException(status_code=404, detail=_CLIP_EXPIRED)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -407,13 +662,57 @@ def _build_router():  # noqa: ANN202 - APIRouter
         _no_store(response)
         _rate_limit(request, "login")
         user = db.get_user_by_email(auth.normalize_email(body.email))
-        # One generic 401 for unknown email and wrong password alike, and
-        # scrypt runs either way (dummy hash for unknown emails), so neither
-        # the body nor the timing is a user-exists oracle.
-        stored = user["password_hash"] if user is not None else auth.dummy_password_hash()
-        if not auth.verify_password(body.password, stored) or user is None:
+        stored = user["password_hash"] if user is not None else ""
+        # A PASSWORD-LESS account — one created by Sign in with Google, whose
+        # row carries `password_hash = ''` (LIBRARY.md Part 1) — is refused
+        # here, and refused as a decision rather than as a side effect of
+        # comparing against an empty hash. `auth.verify_password` says no to
+        # an empty stored value too; this says no before it is ever asked.
+        password_login = bool(stored)
+        # One generic 401 for unknown email, password-less account and wrong
+        # password alike, and scrypt runs in every one of those cases (the
+        # dummy hash stands in where there is no real one), so neither the
+        # body nor the timing tells a stranger which case they hit.
+        if not password_login:
+            stored = auth.dummy_password_hash()
+        if not auth.verify_password(body.password, stored) or user is None or not password_login:
             raise HTTPException(status_code=401, detail=_LOGIN_FAILED)
         return _signed_in(user)
+
+    @router.post("/auth/google", response_model=AuthResponse)
+    def auth_google(
+        body: GoogleAuthRequest, request: Request, response: Response
+    ) -> AuthResponse:
+        """Sign in with a Google ID token (LIBRARY.md Part 1).
+
+        Identity only: Google says who this is, and the session that comes
+        out is the same session `/v1/auth/login` mints — same TTL, same
+        cookie-less bearer, same `no-store`.
+        """
+        _no_store(response)
+        # Its own window, like every other credential route, and for a
+        # sharper reason than most: a forged token costs nothing to send and
+        # costs us an RS256 verify (and, on an unknown `kid`, a fetch) to
+        # refuse.
+        _rate_limit(request, "google")
+        settings = get_settings()
+        if not settings.google_client_id:
+            # 503, not 501/400: a deployment state, exactly like billing off.
+            raise HTTPException(status_code=503, detail=_GOOGLE_SIGN_IN_OFF)
+        try:
+            identity = googleid.verify_id_token(body.id_token, settings.google_client_id)
+        except googleid.KeysUnavailable as error:
+            # We could not check, which is not the same as "you are refused".
+            logger.warning("google sign-in unavailable: %s", error)
+            raise HTTPException(
+                status_code=503, detail=_GOOGLE_KEYS_UNAVAILABLE
+            ) from None
+        except googleid.InvalidIdToken as error:
+            logger.info("google sign-in refused: %s", error)
+            raise HTTPException(
+                status_code=401, detail=_GOOGLE_SIGN_IN_FAILED
+            ) from None
+        return _signed_in(_google_account(identity))
 
     @router.post("/auth/logout", response_model=LogoutResponse)
     def logout(
@@ -442,6 +741,10 @@ def _build_router():  # noqa: ANN202 - APIRouter
             email=user["email"],
             plan=user["plan"],
             plan_status=user["plan_status"],
+            # Password, Google, or both — read off the row, so the account
+            # page can say how someone signs in and never offer "change
+            # password" on an account that has none.
+            auth_methods=_auth_methods(user),
             quota=QuotaOut(
                 limit=entitlements.clips_per_month,
                 used=db.get_usage(user["id"], month),
@@ -452,6 +755,9 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 watermark_required=entitlements.watermark_required,
                 clips_per_month=entitlements.clips_per_month,
                 brand_kit=entitlements.brand_kit,
+                # How long saved clips are KEPT — the account page's retention
+                # line, read from the same plan the reaper enforces.
+                retention_days=entitlements.retention_days,
             ),
             # The stored kit, always — a kit outlives a downgrade on the row
             # (nothing deletes a creator's logo because they changed plan) and
@@ -554,6 +860,236 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 "Content-Security-Policy": "default-src 'none'; sandbox",
             },
         )
+
+    # --------------------------------------------------------------------- #
+    # The clip library (LIBRARY.md Part 2). Session-only and owner-scoped
+    # throughout: somebody else's clip is a 404, never a 403 — the same
+    # convention the job routes use, so a clip id tells a stranger nothing.
+    # --------------------------------------------------------------------- #
+
+    def _owned_clip(clip_id: str, user: dict) -> dict:
+        clip = db.get_clip(clip_id)
+        if clip is None or str(clip["user_id"]) != str(user["id"]):
+            raise HTTPException(status_code=404, detail=_CLIP_UNKNOWN)
+        return clip
+
+    @router.get("/clips", response_model=ClipListResponse)
+    def list_library(
+        response: Response,
+        limit: int = Query(default=20, ge=1, le=50),
+        before: str = Query(default="", max_length=128),
+        user: dict = Depends(auth.require_session),
+    ) -> ClipListResponse:
+        """This account's clips, newest first.
+
+        The cursor is opaque to the client: it hands back whatever
+        `next_before` said. Internally it is the last item's `created_at` plus
+        its id, because one render writes several clips in the same
+        millisecond and a page boundary inside such a group would otherwise
+        skip the rest of it.
+        """
+        _no_store(response)
+        settings = get_settings()
+        cursor, _, cursor_id = before.partition("|")
+        clips = db.list_clips(
+            str(user["id"]), limit=limit, before=cursor, before_id=cursor_id
+        )
+        # Only when the page came back full: a short page IS the end, and
+        # handing out a cursor for it would cost the client a wasted round trip.
+        next_before = None
+        if len(clips) == limit:
+            last = clips[-1]
+            next_before = f"{last['created_at']}|{last['id']}"
+        return ClipListResponse(
+            clips=[_clip_summary(settings, clip) for clip in clips],
+            next_before=next_before,
+        )
+
+    @router.post("/clips/upload", response_model=ClipDetailOut, status_code=201)
+    async def upload_library_clip(
+        request: Request,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> ClipDetailOut:
+        """Save a clip the BROWSER rendered (LIBRARY.md Part 2).
+
+        Deliberately an upload rather than a side effect: the site promises the
+        video never leaves the device, so this only ever runs because somebody
+        clicked "Save to library".
+
+        It costs no monthly quota — nothing was rendered on our hardware, and
+        billing somebody for their own laptop's work would be a lie — which is
+        exactly why it needs its own ceiling: `CC_LIBRARY_MAX_BYTES` per
+        account, so a free plan cannot be turned into a disk. The container is
+        SNIFFED from the bytes, the size is counted as it streams, and `engine`
+        is forced to 'browser' whatever the metadata claims.
+        """
+        _no_store(response)
+        settings = get_settings()
+        content_type = (
+            (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        )
+        if content_type != "multipart/form-data":
+            raise HTTPException(status_code=415, detail=_CLIP_UNSUPPORTED_BODY)
+        declared = request.headers.get("content-length")
+        if declared is None:
+            raise HTTPException(
+                status_code=411, detail="Content-Length header is required."
+            )
+        try:
+            length = int(declared)
+        except ValueError:
+            raise HTTPException(
+                status_code=411, detail="Content-Length header is invalid."
+            ) from None
+        oversize = (
+            f"That clip is larger than the {_format_size(settings.max_clip_bytes)} "
+            "limit for a saved clip."
+        )
+        # The envelope (boundaries + the metadata part) rides on top of the
+        # file, so the body limit is the file limit plus slack; what actually
+        # counts is the byte count below, measured on the file itself.
+        if length > settings.max_clip_bytes + _CLIP_BODY_SLACK_BYTES:
+            raise HTTPException(status_code=413, detail=oversize)
+
+        # Checked BEFORE a byte is read as well as after the file is measured:
+        # an account already at its ceiling deserves to be told so, not after
+        # uploading 200 MB.
+        stored_bytes = db.library_bytes(str(user["id"]))
+        full = (
+            f"Your library is full — the limit is "
+            f"{_format_size(settings.library_max_bytes)} of stored clips, and "
+            f"{_format_size(stored_bytes)} is in use. Delete a clip to make "
+            "room, or let one expire."
+        )
+        if stored_bytes >= settings.library_max_bytes:
+            raise HTTPException(status_code=402, detail=full)
+
+        settings.ensure_dirs()
+        clip_id = uuid.uuid4().hex
+        # Staged in tmp first so the ceiling, the size and the container are
+        # all decided before anything lands under the library root.
+        staging = settings.tmp_dir / f"library-{clip_id}.part"
+        form = await request.form()
+        try:
+            raw_metadata: object = form.get("metadata")
+            if isinstance(raw_metadata, UploadFile):
+                raw_metadata = (
+                    await raw_metadata.read(_CLIP_METADATA_MAX_BYTES + 1)
+                ).decode("utf-8", "replace")
+            metadata = _parse_clip_metadata(raw_metadata)
+
+            field = form.get("file")
+            if not isinstance(field, UploadFile):
+                raise HTTPException(status_code=400, detail=_CLIP_UNSUPPORTED_BODY)
+            head = b""
+            size = 0
+            with staging.open("wb") as fh:
+                while True:
+                    chunk = await field.read(_CLIP_UPLOAD_CHUNK)
+                    if not chunk:
+                        break
+                    if not head:
+                        head = chunk[:64]
+                    size += len(chunk)
+                    if size > settings.max_clip_bytes:
+                        raise HTTPException(status_code=413, detail=oversize)
+                    fh.write(chunk)
+
+            extension = _sniff_clip_type(head)
+            if extension is None:
+                raise HTTPException(status_code=400, detail=_CLIP_NOT_A_VIDEO)
+            if stored_bytes + size > settings.library_max_bytes:
+                raise HTTPException(status_code=402, detail=full)
+
+            file_path = get_storage(settings).put_library_clip(
+                str(user["id"]), f"{clip_id}.{extension}", staging
+            )
+        finally:
+            # Whatever happened — a refusal, a crash, or the copy landing —
+            # the staging file has served its purpose and never outlives the
+            # request that made it.
+            staging.unlink(missing_ok=True)
+            await form.close()
+
+        clip = db.create_clip(
+            clip_id,
+            user_id=str(user["id"]),
+            # No job: this clip was never on our hardware. The column stays ''
+            # so nothing ever tries to resolve it against a jobs row.
+            job_id="",
+            clip_index=metadata.clip_index,
+            title=metadata.title,
+            score=metadata.score,
+            hooks=list(metadata.hooks),
+            reason=metadata.reason,
+            tip=metadata.tip,
+            start=metadata.start,
+            end=metadata.end,
+            duration=metadata.duration,
+            width=metadata.width,
+            height=metadata.height,
+            speaker_count=metadata.speaker_count,
+            words=[word.model_dump() for word in metadata.words],
+            # Forced, never read from the payload: `engine` says where the
+            # pixels came from, and only the server knows that.
+            engine="browser",
+            file_path=file_path,
+            # The bytes we actually wrote, not a number the client sent — this
+            # one feeds the storage ceiling.
+            size_bytes=size,
+            retention_days=PLANS[effective_plan(user)].retention_days,
+        )
+        return _clip_detail(settings, clip)
+
+    @router.get("/clips/{clip_id}", response_model=ClipDetailOut)
+    def get_library_clip(
+        clip_id: str,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> ClipDetailOut:
+        _no_store(response)
+        return _clip_detail(get_settings(), _owned_clip(clip_id, user))
+
+    @router.delete("/clips/{clip_id}", response_model=ClipDeletedResponse)
+    def delete_library_clip(
+        clip_id: str,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> ClipDeletedResponse:
+        """Remove a clip: the row AND the file.
+
+        The only thing that deletes a library row — retention deletes files and
+        keeps rows. The file goes FIRST: the row is the only pointer to it, so
+        dropping the row on a failed unlink would strand the video on our disk
+        with nothing left that knows it is there. A failure leaves both in
+        place, so trying again finishes the job.
+        """
+        _no_store(response)
+        settings = get_settings()
+        clip = _owned_clip(clip_id, user)
+        file_path = str(clip.get("file_path") or "")
+        if file_path:
+            try:
+                get_storage(settings).delete_library_clip(file_path)
+            except Exception:
+                logger.exception("clip %s: could not delete its file", clip_id)
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "That clip couldn't be deleted just now — please try "
+                        "again in a moment."
+                    ),
+                ) from None
+        db.delete_clip(clip_id)
+        return ClipDeletedResponse()
+
+    @router.get("/clips/{clip_id}/file")
+    def get_library_clip_file(
+        clip_id: str, user: dict = Depends(auth.require_session)
+    ) -> Response:
+        """The saved video itself — owner only, 404 once it has expired."""
+        return _clip_file_response(get_settings(), _owned_clip(clip_id, user))
 
     def _require_gateway() -> billing.Gateway:
         """The configured billing gateway, or an honest 503.
@@ -869,7 +1405,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
     @router.get("/files/{job_id}/{name}")
     def get_file(
         job_id: str, name: str, actor: auth.Actor = Depends(auth.require_actor)
-    ) -> FileResponse:
+    ) -> Response:
         settings = get_settings()
         clips_dir = settings.clips_dir
         # Guard traversal: job_id must be a bare 32-hex uuid and name a plain
@@ -881,26 +1417,34 @@ def _build_router():  # noqa: ANN202 - APIRouter
             or not _SAFE_NAME_RE.match(name)
         ):
             raise HTTPException(status_code=404, detail="Not found.")
-        # Ownership rides on the job row; a rendered file with no row (the
-        # reaper is mid-sweep) is treated as already gone.
+        # Ownership rides on the job row while there is one.
         job = db.get_job(job_id)
-        if job is None:
+        if job is not None:
+            _require_job_access(job, actor, detail="Not found.")
+            # Defence in depth: the resolved path must stay inside clips_dir.
+            resolved = (clips_dir / job_id / name).resolve()
+            if resolved.is_relative_to(clips_dir.resolve()) and resolved.is_file():
+                media_type = "video/mp4" if name.endswith(".mp4") else None
+                # A rendered clip is one account's private video: shared caches
+                # must never keep a copy, and the browser must revalidate
+                # rather than serve it after the job is reaped or the session
+                # changes hands.
+                return FileResponse(
+                    resolved,
+                    media_type=media_type,
+                    filename=name,
+                    headers={"Cache-Control": "private, max-age=0"},
+                )
+        # The job's own copy is gone — reaped at CC_JOB_TTL_HOURS, row and all.
+        # The LIBRARY keeps its own copy for the owner's whole retention
+        # window, so a link the account already holds keeps working long after
+        # the job that made it stopped existing. Scoped to the caller's own
+        # account, so this can only ever find their clip (db.get_clip_by_file),
+        # and the founder token — which owns no library — finds nothing.
+        clip = db.get_clip_by_file(actor.user_id, f"{actor.user_id}/{job_id}/{name}")
+        if clip is None:
             raise HTTPException(status_code=404, detail="Not found.")
-        _require_job_access(job, actor, detail="Not found.")
-        # Defence in depth: the resolved path must stay inside clips_dir.
-        resolved = (clips_dir / job_id / name).resolve()
-        if not resolved.is_relative_to(clips_dir.resolve()) or not resolved.is_file():
-            raise HTTPException(status_code=404, detail="Not found.")
-        media_type = "video/mp4" if name.endswith(".mp4") else None
-        # A rendered clip is one account's private video: shared caches must
-        # never keep a copy, and the browser must revalidate rather than serve
-        # it after the job is reaped or the session changes hands.
-        return FileResponse(
-            resolved,
-            media_type=media_type,
-            filename=name,
-            headers={"Cache-Control": "private, max-age=0"},
-        )
+        return _clip_file_response(settings, clip)
 
     @router.get("/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:

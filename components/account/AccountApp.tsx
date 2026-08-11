@@ -34,6 +34,8 @@ import {
   type Plan,
 } from "@/lib/account";
 import { useAccount } from "./AccountProvider";
+import GoogleSignInButton from "./GoogleSignInButton";
+import LibrarySection from "./LibrarySection";
 
 const PLAN_LABELS: Record<Plan, string> = {
   free: "Free",
@@ -261,8 +263,25 @@ function AuthCard() {
               : "Create account"}
         </Button>
       </form>
+
+      {/* Google, alongside the password form and never instead of it. Renders
+          nothing — and loads no third-party script — when this build has no
+          client id (LIBRARY.md Part 1). */}
+      <GoogleSignInButton />
     </Card>
   );
+}
+
+/** How this account signs in, said plainly. Read from /v1/me's `auth_methods`
+ *  so it can never disagree with what the two sign-in paths accept — an
+ *  account created with Google has no password to change. */
+function authMethodsLine(methods: string[] | undefined): string {
+  if (!methods || methods.length === 0) return "";
+  const google = methods.includes("google");
+  const password = methods.includes("password");
+  if (google && password) return "Signs in with Google or a password.";
+  if (google) return "Signs in with Google.";
+  return "Signs in with an email and password.";
 }
 
 // ---- 3. Signed in: plan / usage / upgrades ---------------------------------
@@ -697,6 +716,11 @@ export default function AccountApp() {
                     Your account
                   </h1>
                   <p className="mt-2 text-sm text-zinc-400">{user.email}</p>
+                  {authMethodsLine(user.auth_methods) ? (
+                    <p className="mt-1 font-mono text-xs text-zinc-600">
+                      {authMethodsLine(user.auth_methods)}
+                    </p>
+                  ) : null}
                 </div>
                 <Button
                   variant="ghost"
@@ -712,9 +736,18 @@ export default function AccountApp() {
                 <UsageCard user={user} />
               </div>
 
+              {/* The clip library. Its own fetch (GET /v1/clips), so the
+                  dashboard paints as soon as /v1/me lands. */}
+              <div className="mt-10">
+                <LibrarySection
+                  user={user}
+                  planLabel={PLAN_LABELS[effectivePlan(user)]}
+                />
+              </div>
+
               {/* Same component the Studio panel is, same local-first kit —
                   here it also syncs to the account so cloud renders match. */}
-              <div className="mt-5">
+              <div className="mt-10">
                 <BrandKitPanel variant="account" />
               </div>
 

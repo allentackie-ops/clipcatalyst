@@ -537,15 +537,20 @@ def test_no_code_path_reaches_apply_event_without_verification() -> None:
 
 
 @pytest.mark.parametrize(
-    ("price_id", "plan", "limit", "max_height"),
+    ("price_id", "plan", "limit", "max_height", "retention"),
     [
-        (PRICE_STARTER, "starter", 30, 1920),
-        (PRICE_PRO, "pro", 100, 3840),
-        (PRICE_ENTERPRISE, "enterprise", None, 3840),
+        (PRICE_STARTER, "starter", 30, 1920, 30),
+        (PRICE_PRO, "pro", 100, 3840, 90),
+        (PRICE_ENTERPRISE, "enterprise", None, 3840, None),
     ],
 )
 def test_checkout_completed_maps_each_price_to_its_plan(
-    sandbox: SimpleNamespace, price_id: str, plan: str, limit: int | None, max_height: int
+    sandbox: SimpleNamespace,
+    price_id: str,
+    plan: str,
+    limit: int | None,
+    max_height: int,
+    retention: int | None,
 ) -> None:
     from clipcatalyst_api import db
 
@@ -575,6 +580,8 @@ def test_checkout_completed_maps_each_price_to_its_plan(
         "watermark_required": False,
         "clips_per_month": limit,
         "brand_kit": True,  # every paid plan carries one (BRANDKIT.md)
+        # How long saved clips are kept; None = forever (LIBRARY.md Part 2).
+        "retention_days": retention,
     }
 
 
@@ -714,6 +721,9 @@ def test_subscription_deleted_returns_the_account_to_free(
         "watermark_required": True,
         "clips_per_month": 3,
         "brand_kit": False,  # cancelling takes the kit back with the plan
+        # New clips get the free window from here on. Clips ALREADY saved keep
+        # the longer deadline they were given — see test_library.py.
+        "retention_days": 7,
     }
 
 

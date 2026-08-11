@@ -6,7 +6,7 @@
 // here: every re-render lands in session.rendered, and only previously-edited
 // URLs are ever revoked. A failed re-render keeps the last good file.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import {
   resolveEdits,
@@ -86,6 +86,7 @@ export default function ResultsView({
   brandKit,
   failedCount,
   onReset,
+  renderSaveAction,
 }: {
   clips: StudioClip[];
   sourceUrl: string;
@@ -97,6 +98,11 @@ export default function ResultsView({
   brandKit: BrandKit;
   failedCount: number;
   onReset: () => void;
+  /** Builds each card's "Save to library" control, given the file the card is
+   *  actually showing (the re-rendered one once an edit is baked in). A
+   *  callback rather than an import: uploading needs the account, and this
+   *  view is the device pipeline's, which works with no account at all. */
+  renderSaveAction?: (clip: FinishedClip, index: number) => ReactNode;
 }) {
   const [sessions, setSessions] = useState<EditSession[]>(() =>
     clips.map(() => newEditSession())
@@ -285,15 +291,19 @@ export default function ResultsView({
           clips.length > 1 ? "md:grid-cols-2" : "md:max-w-md"
         } ${clips.length > 2 ? "xl:max-w-6xl xl:grid-cols-3" : ""}`}
       >
-        {clips.map((clip, i) => (
-          <ClipCard
-            key={clip.id}
-            clip={displayClip(clip, sessions[i])}
-            index={i}
-            edited={sessions[i].rendered !== null}
-            onEdit={() => openEditor(i)}
-          />
-        ))}
+        {clips.map((clip, i) => {
+          const shown = displayClip(clip, sessions[i]);
+          return (
+            <ClipCard
+              key={clip.id}
+              clip={shown}
+              index={i}
+              edited={sessions[i].rendered !== null}
+              onEdit={() => openEditor(i)}
+              saveAction={renderSaveAction?.(shown, i)}
+            />
+          );
+        })}
       </div>
 
       <p className="mt-10 text-center font-mono text-xs text-zinc-500">

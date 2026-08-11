@@ -20,7 +20,7 @@ from typing import Mapping, Protocol
 import stripe
 
 from . import db
-from .plans import PLANS
+from .plans import PLANS, effective_plan
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -247,6 +247,13 @@ def _handle_subscription_deleted(subscription: Mapping[str, object]) -> None:
         db.update_user(
             str(user["id"]), plan="free", plan_status="canceled", current_period_end=""
         )
+        # Deliberately called on the way DOWN too, and deliberately harmless:
+        # sync_clip_retention only ever extends, so a cancellation leaves every
+        # existing clip exactly where it was. Calling it on both edges means
+        # there is one plan-change path, not one that remembers the library and
+        # one that forgets — the kind of asymmetry that quietly starts deleting
+        # people's clips early the first time somebody adds a downgrade route.
+        sync_clip_retention(str(user["id"]))
 
 
 def _handle_payment_failed(invoice: Mapping[str, object]) -> None:
@@ -282,6 +289,25 @@ def _apply_subscription(
             user.get("plan"),
         )
     db.update_user(str(user["id"]), **fields)
+    sync_clip_retention(str(user["id"]))
+
+
+def sync_clip_retention(user_id: str) -> int:
+    """Re-apply an account's CURRENT retention window to its library.
+
+    Called after every plan change, because a plan change is the only thing
+    that moves the window. EXTENDS ONLY (the rule and its reasoning live in
+    db.extend_clip_expiry): an upgrade lengthens what somebody already made, a
+    downgrade leaves it alone and only affects clips saved from then on.
+
+    Reads the EFFECTIVE plan, not the stored name, so a subscription that is
+    canceled-but-still-named-pro extends nothing — the same table every other
+    entitlement is read from. Returns how many clips moved.
+    """
+    user = db.get_user_by_id(user_id)
+    if user is None:
+        return 0
+    return db.extend_clip_expiry(user_id, PLANS[effective_plan(user)].retention_days)
 
 
 def _resolve_subscription(

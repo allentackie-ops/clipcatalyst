@@ -302,6 +302,18 @@ function decodeLogo(dataUrl: string): Promise<HTMLImageElement | null> {
   });
 }
 
+/**
+ * The output width for a 9:16 render at `height` — the nearest even pixel,
+ * because encoders want even dimensions.
+ *
+ * Exported so anything that has to DESCRIBE a finished clip (the library
+ * upload's metadata) reports the size this renderer really used, instead of
+ * re-deriving a number that lives here.
+ */
+export function outputWidth(height: number): number {
+  return Math.round((height * 9) / 16 / 2) * 2;
+}
+
 export async function renderClip(
   source: { url: string },
   plan: ClipPlan,
@@ -325,7 +337,7 @@ export async function renderClip(
 
   const clipDuration = Math.max(0.1, plan.end - plan.start);
   const height = options.height;
-  const width = Math.round((height * 9) / 16 / 2) * 2; // nearest even 9:16 width
+  const width = outputWidth(height);
 
   // --- Hidden video element -------------------------------------------------
   const video = document.createElement("video");

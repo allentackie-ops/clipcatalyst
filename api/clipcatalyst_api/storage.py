@@ -16,12 +16,26 @@ One interface, two implementations:
 - ``delete_source(job_id)`` — drop the uploaded source once a job is terminal
   (local: the uploads file; S3: the bucket object AND the tmp staging copy).
 
+The clip library (LIBRARY.md Part 2) has its own four calls and its own root,
+which is the point — a job's clips directory is swept by the reaper and by the
+lost-claim cleanup, and a saved clip must be somewhere neither of them can
+reach:
+
+- ``put_library_clip(user_id, name, path)`` — persist a saved clip; returns the
+  ``file_path`` to store on the row (local: relative to ``library_dir``; S3:
+  the object key).
+- ``library_clip_file(file_path)`` — a local file the API can serve, or None.
+- ``library_clip_url(file_path)`` — a URL to send the browser to instead
+  ('' when the file is local and the API serves it itself).
+- ``delete_library_clip(file_path)`` — remove one stored clip.
+
 boto3 (and its bundled botocore) are imported lazily so the API/worker
 containers only need them when ``CC_STORAGE=s3``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 from pathlib import Path
 from typing import Protocol
@@ -30,6 +44,17 @@ from .settings import Settings
 
 _PRESIGNED_PUT_EXPIRES = 3600  # 1 h to upload
 _PRESIGNED_GET_EXPIRES = 7 * 24 * 3600  # 7 days, the S3 maximum
+
+#: The containers a clip can be stored in — mp4 from the cloud renderer, and
+#: mp4 OR webm from the browser, whose MediaRecorder picks whichever the
+#: device supports. Anything else never becomes a stored file (main.py sniffs
+#: the bytes before writing them).
+CLIP_MEDIA_TYPES = {"mp4": "video/mp4", "webm": "video/webm"}
+
+
+def clip_media_type(name: str) -> str | None:
+    """The media type for a stored clip name, from its extension."""
+    return CLIP_MEDIA_TYPES.get(name.rsplit(".", 1)[-1].lower())
 
 
 class Storage(Protocol):
@@ -46,6 +71,14 @@ class Storage(Protocol):
     def clip_url(self, job_id: str, name_or_key: str) -> str: ...
 
     def delete_source(self, job_id: str) -> None: ...
+
+    def put_library_clip(self, user_id: str, name: str, path: str | Path) -> str: ...
+
+    def library_clip_file(self, file_path: str) -> Path | None: ...
+
+    def library_clip_url(self, file_path: str) -> str: ...
+
+    def delete_library_clip(self, file_path: str) -> None: ...
 
 
 def get_storage(settings: Settings) -> Storage:
@@ -95,6 +128,68 @@ class LocalStorage:
             self.source_path(job_id).unlink(missing_ok=True)
         except OSError:
             pass
+
+    # --- the clip library ------------------------------------------------ #
+
+    def put_library_clip(self, user_id: str, name: str, path: str | Path) -> str:
+        """Copy a rendered clip into the library and return its stored path.
+
+        Under ``library_dir``, never under ``clips_dir``: the job reaper and
+        the lost-claim cleanup both ``rmtree(clips_dir / job_id)``, and a
+        library file in there would be deleted by a sweep that has no idea the
+        library exists. The returned value is RELATIVE to the library root, so
+        moving the data directory does not invalidate every stored row.
+        """
+        dest = self._library_root() / user_id / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, dest)
+        return f"{user_id}/{name}"
+
+    def library_clip_file(self, file_path: str) -> Path | None:
+        """The stored clip as a real file, or None if it isn't one.
+
+        Resolved and then checked against the library root, the same
+        belt-and-braces the files route uses: a stored value is data, and data
+        that has been in a database is not automatically a safe path.
+        """
+        if not file_path:
+            return None
+        root = self._library_root()
+        resolved = (root / file_path).resolve()
+        if not resolved.is_relative_to(root.resolve()) or not resolved.is_file():
+            return None
+        return resolved
+
+    def library_clip_url(self, file_path: str) -> str:
+        """Local files are served by the API itself — there is nowhere to send
+        the browser instead."""
+        return ""
+
+    def delete_library_clip(self, file_path: str) -> None:
+        """Delete one stored clip, and prune the directory it leaves empty.
+
+        Raises on a real filesystem failure, unlike ``delete_source``: this is
+        a deliberate deletion whose caller (the retention reaper) only blanks
+        the row once the file is genuinely gone, so a swallowed error would
+        leak the file forever by convincing the reaper it had succeeded.
+        """
+        if not file_path:
+            return
+        root = self._library_root().resolve()
+        resolved = (root / file_path).resolve()
+        if not resolved.is_relative_to(root):
+            return  # not ours to delete
+        resolved.unlink(missing_ok=True)
+        # A job's directory is empty once its last clip goes; the account's own
+        # directory stays. rmdir refuses a non-empty directory, which is
+        # exactly the check we want.
+        parent = resolved.parent
+        if parent != root and parent.is_relative_to(root):
+            with contextlib.suppress(OSError):
+                parent.rmdir()
+
+    def _library_root(self) -> Path:
+        return self._settings.library_dir
 
 
 class S3Storage:
@@ -219,3 +314,42 @@ class S3Storage:
             (self._settings.tmp_dir / f"{job_id}.src").unlink(missing_ok=True)
         except OSError:
             pass
+
+    # --- the clip library ------------------------------------------------ #
+
+    def put_library_clip(self, user_id: str, name: str, path: str | Path) -> str:
+        """Upload a saved clip under the library prefix; returns its key.
+
+        Its own prefix, not ``clips/``, for the same reason the local backend
+        uses its own directory: the job sweeps delete by job, and a saved clip
+        must not be reachable by anything that sweeps.
+        """
+        key = self._key("library", user_id, name)
+        extra = {}
+        media_type = clip_media_type(name)
+        if media_type:
+            extra["ContentType"] = media_type
+        self._s3().upload_file(
+            str(path), self._settings.s3_bucket, key, ExtraArgs=extra or None
+        )
+        return key
+
+    def library_clip_file(self, file_path: str) -> Path | None:
+        """Nothing local to serve — the browser goes to the presigned URL."""
+        return None
+
+    def library_clip_url(self, file_path: str) -> str:
+        """Presigned GET for a stored clip, minted on demand at read time."""
+        if not file_path:
+            return ""
+        return self._s3().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._settings.s3_bucket, "Key": file_path},
+            ExpiresIn=_PRESIGNED_GET_EXPIRES,
+        )
+
+    def delete_library_clip(self, file_path: str) -> None:
+        """Delete one stored clip. Raises — see LocalStorage for why."""
+        if not file_path:
+            return
+        self._s3().delete_object(Bucket=self._settings.s3_bucket, Key=file_path)

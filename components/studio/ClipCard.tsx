@@ -3,6 +3,7 @@
 // Done state: one rendered clip — preview, score, hooks, download/share, and
 // (device clips only) the door into the chat editor.
 
+import type { ReactNode } from "react";
 import { Badge, Card, ScoreRing } from "@/components/ui";
 import type { FinishedClip } from "@/lib/studio/types";
 import { formatBytes, formatDuration } from "./format";
@@ -15,6 +16,7 @@ export default function ClipCard({
   index,
   edited = false,
   onEdit,
+  saveAction,
 }: {
   /** Cloud clips carry a server-computed speakerCount (their words are []). */
   clip: FinishedClip & { speakerCount?: number };
@@ -23,6 +25,10 @@ export default function ClipCard({
   edited?: boolean;
   /** Opens the clip editor. Absent (cloud clips) → no Edit button. */
   onEdit?: () => void;
+  /** "Save to library", when there is an account to save it to. Passed in
+   *  rather than built here: uploading is an account concern, and a card that
+   *  imported one would drag it into every grid that shows a clip. */
+  saveAction?: ReactNode;
 }) {
   const duration = clip.end - clip.start;
   const format = clip.extension === "mp4" ? "MP4" : "WEBM";
@@ -169,6 +175,7 @@ export default function ClipCard({
             Edit
           </button>
         ) : null}
+        {saveAction}
       </div>
     </Card>
   );

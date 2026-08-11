@@ -13,7 +13,9 @@ import dataclasses
 import logging
 import shutil
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from celery.exceptions import SoftTimeLimitExceeded, Terminated
 
@@ -95,7 +97,31 @@ class _LostClaim(Exception):
     Handled in process_job, which stops the run without a status write and
     without a settlement — deliberately NOT a PipelineError, which would land
     in _fail and write the very terminal state we must not write.
+
+    ``staged`` carries the library files this run had already copied out of the
+    job's directory (see _stage_library_file). They belong to nobody — no row
+    was ever written for them, because rows are written only after the
+    processing→done transition is WON — so process_job removes them.
     """
+
+    def __init__(self, job_id: str, staged: tuple[str, ...] = ()) -> None:
+        super().__init__(job_id)
+        self.staged = staged
+
+
+@dataclasses.dataclass(frozen=True)
+class _StagedClip:
+    """One rendered clip on its way into the library.
+
+    Held between the render loop (which copies the file into the library root
+    while the render is still on disk) and _publish_library (which writes the
+    row, and only once this run has WON the right to publish anything).
+    """
+
+    plan: ClipPlan
+    clip: dict  # the ClipOut dict the job row publishes
+    file_path: str  # what the library row will point at
+    size_bytes: int
 
 
 class _Throttle:
@@ -122,7 +148,7 @@ def process_job(self, job_id: str) -> None:
     owns_job = True
     try:
         _run(job_id, settings, storage)
-    except _LostClaim:
+    except _LostClaim as lost:
         # Ordered FIRST: every handler below writes a terminal status, which is
         # precisely what a run that lost its row may not do. Stop cleanly and
         # drop any output this run produced (see _discard_output).
@@ -130,7 +156,7 @@ def process_job(self, job_id: str) -> None:
         logger.warning(
             "job %s: the row moved out from under this run; discarding it", job_id
         )
-        _discard_output(settings, job_id)
+        _discard_output(settings, storage, job_id, lost.staged)
     except SoftTimeLimitExceeded:
         # Fired ~60 s before the hard kill: record a terminal failure while we
         # still can, then re-raise so Celery marks the task FAILURE too.
@@ -186,7 +212,9 @@ def _fail(job_id: str, message: str) -> None:
         logger.exception("job %s: could not record failed status", job_id)
 
 
-def _discard_output(settings: Settings, job_id: str) -> None:
+def _discard_output(
+    settings: Settings, storage: Storage, job_id: str, staged: tuple[str, ...] = ()
+) -> None:
     """Bin clips rendered by a run that turned out not to own its job row.
 
     ``GET /v1/files/{job_id}/{name}`` serves whatever sits under the job's
@@ -197,12 +225,31 @@ def _discard_output(settings: Settings, job_id: str) -> None:
     Only for a row that is failed or gone. A row still `processing` or already
     `done` belongs to somebody else — a duplicate delivery mid-render, or the
     run that legitimately finished — and their clips are not ours to delete.
+
+    ``staged`` names the library copies THIS run made, and only those: the
+    rmtree above cannot reach them (the library has its own root), so they are
+    removed by name. Each one is checked against the library first, because
+    "the job row is gone" is also what a job reaped at 48 h looks like — and
+    that job's clips may well still be sitting in somebody's library, saved
+    from a run that finished perfectly a month ago. A file a live row still
+    points at is never deleted here.
     """
     try:
         job = db.get_job(job_id)
         if job is not None and job["status"] != "failed":
             return
         shutil.rmtree(settings.clips_dir / job_id, ignore_errors=True)
+        for file_path in staged:
+            if db.clip_file_referenced(file_path):
+                continue
+            try:
+                storage.delete_library_clip(file_path)
+            except Exception:
+                logger.warning(
+                    "job %s: could not remove staged library file %s",
+                    job_id,
+                    file_path,
+                )
     except Exception:
         logger.warning("job %s: could not discard the lost run's output", job_id)
 
@@ -395,6 +442,10 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         caption_color=caption_color,
     )
     clips: list[dict] = []
+    # Library copies made by this run, in render order. They are FILES only
+    # until the finalize below succeeds — a file nothing points at is invisible
+    # to every route, while a row is a clip somebody owns. See _publish_library.
+    staged: list[_StagedClip] = []
     failed_count = 0
 
     for index, plan in enumerate(plans):
@@ -418,6 +469,12 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
                 src, plan, out_path, opts, settings, on_render_progress, tracks[index]
             )
             storage.put_clip(job_id, rendered.path, name)
+            # Copied out of the job's world WHILE the render is still on disk,
+            # because a moment later the `finally` below unlinks it. The
+            # destination is the library root, which no job sweep touches.
+            library_path, library_size = _stage_library_file(
+                storage, settings, job, name, rendered.path
+            )
         except _CONTROL_SIGNALS:
             # see _CONTROL_SIGNALS: swallowing this here reported an unusual
             # codec instead of the timeout, and then burned the remaining
@@ -434,9 +491,19 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         finally:
             out_path.unlink(missing_ok=True)
 
-        clips.append(
-            _clip_out(plan, index, storage.clip_url(job_id, name), rendered.width, rendered.height)
+        clip = _clip_out(
+            plan, index, storage.clip_url(job_id, name), rendered.width, rendered.height
         )
+        clips.append(clip)
+        if library_path:
+            staged.append(
+                _StagedClip(
+                    plan=plan,
+                    clip=clip,
+                    file_path=library_path,
+                    size_bytes=library_size,
+                )
+            )
 
     if not clips:
         raise PipelineError(_ALL_RENDERS_FAILED_ERROR)
@@ -472,7 +539,99 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         detail=done_detail,
         error=None,
     ):
-        raise _LostClaim(job_id)
+        raise _LostClaim(job_id, tuple(item.file_path for item in staged))
+
+    # The library rows land HERE — after the transition that decided this run
+    # owns the job, and long (CC_JOB_TTL_HOURS) before anything can reap it.
+    #
+    # Not one statement earlier: a run that loses the guard above has rendered
+    # clips nobody was billed for, and stocking somebody's permanent library
+    # with them is the free-clips hole in its most durable form. Losing the
+    # guard raises instead, and the staged FILES — which no row points at, so
+    # no route can reach — are removed by _discard_output.
+    _publish_library(job, staged)
+
+
+def _stage_library_file(
+    storage: Storage, settings: Settings, job: dict, name: str, rendered_path: str
+) -> tuple[str, int]:
+    """Copy one rendered clip into the library root; ('', 0) when it can't.
+
+    Best-effort by design: the clip itself has already rendered and is being
+    delivered on the job, so a library copy that fails must not fail it. A clip
+    with no copy simply gets no library row — better than a row that reads as
+    expired the day it was made.
+
+    Anonymous founder/dev jobs (no user_id) have no account to own a library
+    entry, so they never make one.
+    """
+    owner_id = str(job.get("user_id") or "")
+    if not owner_id:
+        return "", 0
+    try:
+        settings.ensure_dirs()
+        size_bytes = Path(rendered_path).stat().st_size
+        # <user>/<job>/<name>: it keeps one job's clips together, and it is
+        # what `GET /v1/files/{job_id}/{name}` rebuilds to keep an old link
+        # working after the job row itself has been reaped.
+        stored = storage.put_library_clip(owner_id, f"{job['id']}/{name}", rendered_path)
+    except Exception:
+        logger.warning(
+            "job %s: could not save %s to the library", job.get("id"), name, exc_info=True
+        )
+        return "", 0
+    return stored, size_bytes
+
+
+def _publish_library(job: dict, staged: list[_StagedClip]) -> None:
+    """Write one library row per clip this run rendered and staged.
+
+    ``expires_at`` is computed from the owner's plan RIGHT NOW (db.create_clip
+    turns retention_days into a deadline), which is the same rule the render
+    itself follows for height, watermark and brand kit: entitlements are read
+    at render time, never off the job row.
+
+    Best-effort, per clip: the job is already `done` and its clips are already
+    published, so a library write that fails must not turn a finished render
+    into a failure. The clip stays downloadable from the job either way.
+    """
+    owner = _owner_of(job)
+    if owner is None:
+        return
+    retention_days = PLANS[effective_plan(owner)].retention_days
+    for item in staged:
+        clip = item.clip
+        try:
+            db.create_clip(
+                uuid.uuid4().hex,
+                user_id=str(owner["id"]),
+                job_id=str(job["id"]),
+                clip_index=int(clip["index"]),
+                title=str(clip["title"]),
+                score=int(clip["score"]),
+                hooks=list(clip["hooks"]),
+                reason=str(clip["reason"]),
+                tip=str(clip["tip"]),
+                start=float(clip["start"]),
+                end=float(clip["end"]),
+                duration=float(clip["duration"]),
+                width=int(clip["width"]),
+                height=int(clip["height"]),
+                speaker_count=int(clip["speaker_count"]),
+                # The transcript outlives the video, as decided — these are the
+                # clip's own words, already re-based to its start by plan_clips.
+                words=[dataclasses.asdict(word) for word in item.plan.words],
+                engine="cloud",
+                file_path=item.file_path,
+                size_bytes=item.size_bytes,
+                retention_days=retention_days,
+            )
+        except Exception:
+            logger.exception(
+                "job %s: could not write the library row for clip %s",
+                job.get("id"),
+                clip.get("id"),
+            )
 
 
 def _diarize_transcript(
@@ -653,6 +812,14 @@ def reap_expired() -> int:
     any quota it is still holding, then remove its clips directory, any stray
     source file on disk, and the DB row. Returns the number of jobs reaped.
     Safe to run repeatedly; unit-testable on its own.
+
+    This is PIPELINE state and nothing else. A clip saved to somebody's library
+    is a separate row with a separate lifetime, and its file lives under
+    ``settings.library_dir`` — not under the ``clips_dir / job_id`` tree this
+    rmtree walks — so a 48 h sweep of finished jobs cannot take a video out of
+    a library that is meant to keep it for 90 days. The library has its own
+    reaper (reap_expired_clips), which deletes files by their own deadline and
+    keeps every row.
     """
     settings = get_settings()
     db.init_db()
@@ -686,6 +853,45 @@ def reap_expired() -> int:
     return reaped
 
 
+def reap_expired_clips() -> int:
+    """Delete the FILE of every library clip past its window; KEEP the row.
+
+    Retention (LIBRARY.md Part 2) is a promise about storage, not about
+    memory: at ``expires_at`` the video goes and ``file_path`` becomes '', but
+    the title, score, hooks and transcript stay forever. A row is deleted only
+    when its owner deletes it. Clips with no deadline ('' — the enterprise
+    window) are never selected at all.
+
+    The file is removed BEFORE the row is blanked, and that order is the whole
+    error handling: a sweep that dies in between leaves a row still naming a
+    file that is already gone, which the next sweep selects again and finishes
+    (deleting a missing file is a no-op). Blanking first would lose the only
+    pointer to the file and leak it forever. A file that genuinely cannot be
+    deleted leaves its row alone, so the next hour tries again instead of
+    telling the owner their clip expired while it still sits on our disk.
+    """
+    settings = get_settings()
+    db.init_db()
+    storage = get_storage(settings)
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+    reaped = 0
+    for clip in db.list_expired_clips(now):
+        try:
+            storage.delete_library_clip(clip["file_path"])
+        except Exception:
+            logger.warning(
+                "clip %s: could not delete the expired file %s",
+                clip["id"],
+                clip["file_path"],
+                exc_info=True,
+            )
+            continue
+        if db.clear_clip_file(clip["id"]):
+            reaped += 1
+    return reaped
+
+
 @celery_app.task(name="clipcatalyst.reap_expired")
 def reap_expired_task() -> int:
     """Celery entry point for the hourly maintenance sweep (run by beat).
@@ -696,6 +902,10 @@ def reap_expired_task() -> int:
     refund ran. Reconciling on the same hourly tick means a job abandoned by a
     dead worker gets its quota back within the hour, whatever the API process
     is doing. Returns the reaped count, as before.
+
+    The library's own retention runs on the same tick and is independent in
+    both directions: it never touches a job, and the job reaper never touches
+    a library file.
     """
     stalled = reconcile_stalled()
     if stalled:
@@ -703,4 +913,7 @@ def reap_expired_task() -> int:
     count = reap_expired()
     if count:
         logger.info("reaper removed %d expired job(s)", count)
+    expired_clips = reap_expired_clips()
+    if expired_clips:
+        logger.info("retention removed %d expired clip file(s)", expired_clips)
     return count

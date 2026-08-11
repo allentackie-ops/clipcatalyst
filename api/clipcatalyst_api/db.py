@@ -1,4 +1,4 @@
-"""SQLite store for jobs and accounts (WAL, short-lived connections).
+"""SQLite store for jobs, accounts and the clip library (WAL, short conns).
 
 Plain sqlite3 with a tiny DAO. Every call opens its own connection so the
 module is safe across threads and across the API / worker process boundary.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .settings import get_settings
@@ -58,10 +58,38 @@ _UPDATABLE = {
     "clips_json",
 }
 
+#: One saved clip (LIBRARY.md Part 2). Deliberately NOT the jobs row: a job is
+#: pipeline state and gets reaped at CC_JOB_TTL_HOURS, while the library
+#: outlives it — the metadata here is permanent, and only the FILE expires.
+_CLIP_COLUMNS = (
+    "id",
+    "user_id",
+    "job_id",
+    "clip_index",
+    "title",
+    "score",
+    "hooks",
+    "reason",
+    "tip",
+    "start",
+    "end",
+    "duration",
+    "width",
+    "height",
+    "speaker_count",
+    "words",
+    "engine",
+    "file_path",
+    "bytes",
+    "created_at",
+    "expires_at",
+)
+
 _USER_COLUMNS = (
     "id",
     "email",
     "password_hash",
+    "google_sub",
     "created_at",
     "stripe_customer_id",
     "plan",
@@ -79,6 +107,11 @@ _USER_COLUMNS = (
 # The brand_* fields are the one group a user writes directly (PUT/DELETE
 # /v1/me/brand). They carry no entitlement: what the plan allows is re-read at
 # render time from the plan itself, so a stored kit can never grant anything.
+#
+# `google_sub` is deliberately absent too — it is a second identity for the
+# account, as load-bearing as `email`. It moves only through link_google_sub,
+# which fills an EMPTY sub and nothing else, so no code path can silently
+# re-point an existing account at a different Google identity.
 _USER_UPDATABLE = {
     "password_hash",
     "stripe_customer_id",
@@ -124,6 +157,7 @@ CREATE TABLE IF NOT EXISTS users (
     id                  TEXT PRIMARY KEY,
     email               TEXT NOT NULL UNIQUE,
     password_hash       TEXT NOT NULL,
+    google_sub          TEXT NOT NULL DEFAULT '',
     created_at          TEXT NOT NULL,
     stripe_customer_id  TEXT NOT NULL DEFAULT '',
     plan                TEXT NOT NULL DEFAULT 'free',
@@ -155,6 +189,49 @@ CREATE TABLE IF NOT EXISTS usage (
     clips_used INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, month)
 )
+""",
+    # The clip library. `file_path` is relative to the storage backend's
+    # library root (local: settings.library_dir; s3: the bucket key) and goes
+    # back to '' when the reaper deletes the file — the row itself stays, which
+    # is the whole point: a clip's title, score, hooks and transcript outlive
+    # its video. `end` is quoted because it is a SQL keyword.
+    """
+CREATE TABLE IF NOT EXISTS clips (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    job_id        TEXT NOT NULL DEFAULT '',
+    clip_index    INTEGER NOT NULL DEFAULT 0,
+    title         TEXT NOT NULL DEFAULT '',
+    score         INTEGER NOT NULL DEFAULT 0,
+    hooks         TEXT NOT NULL DEFAULT '[]',
+    reason        TEXT NOT NULL DEFAULT '',
+    tip           TEXT NOT NULL DEFAULT '',
+    start         REAL NOT NULL DEFAULT 0,
+    "end"         REAL NOT NULL DEFAULT 0,
+    duration      REAL NOT NULL DEFAULT 0,
+    width         INTEGER NOT NULL DEFAULT 0,
+    height        INTEGER NOT NULL DEFAULT 0,
+    speaker_count INTEGER NOT NULL DEFAULT 0,
+    words         TEXT NOT NULL DEFAULT '',
+    engine        TEXT NOT NULL DEFAULT 'cloud',
+    file_path     TEXT NOT NULL DEFAULT '',
+    bytes         INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL DEFAULT ''
+)
+""",
+    # The library list is always "this user's clips, newest first" — the index
+    # is that query.
+    """
+CREATE INDEX IF NOT EXISTS clips_user_created
+    ON clips (user_id, created_at DESC)
+""",
+    # The reaper's query is "every clip whose file has outlived its window",
+    # across all users; '' means never and sorts before every real timestamp,
+    # so the partial index keeps the unlimited rows out of it entirely.
+    """
+CREATE INDEX IF NOT EXISTS clips_expiring
+    ON clips (expires_at) WHERE file_path != '' AND expires_at != ''
 """,
 )
 
@@ -208,6 +285,20 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE users ADD COLUMN brand_show_logo INTEGER NOT NULL DEFAULT 1"
         )
+    # Sign in with Google (LIBRARY.md Part 1). '' means "no Google identity",
+    # which is what every account that predates this column is.
+    if "google_sub" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT NOT NULL DEFAULT ''")
+    # One Google identity belongs to at most ONE account — the index is what
+    # makes that true under concurrency, rather than a lookup racing an insert.
+    # It is PARTIAL because '' is the "no Google identity" value and every
+    # password-only row carries it: a plain UNIQUE index would let exactly one
+    # such account exist. Created here rather than in _SCHEMA_STATEMENTS
+    # because on an upgraded DB the column only exists after the ALTER above.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique"
+        " ON users (google_sub) WHERE google_sub != ''"
+    )
 
 
 def init_db() -> None:
@@ -427,19 +518,28 @@ def _user_dict(row: sqlite3.Row) -> dict:
     return {key: row[key] for key in _USER_COLUMNS}
 
 
-def create_user(user_id: str, *, email: str, password_hash: str) -> dict | None:
-    """Insert a user; returns the row, or None when the email is taken.
+def create_user(
+    user_id: str, *, email: str, password_hash: str, google_sub: str = ""
+) -> dict | None:
+    """Insert a user; returns the row, or None when email/google_sub is taken.
 
     The UNIQUE(email) constraint is the race-safe duplicate check — callers
-    map None to a 409 instead of racing a lookup against the insert.
+    map None to a 409 instead of racing a lookup against the insert. The
+    partial UNIQUE index on google_sub does the same for the Google identity,
+    so two simultaneous first-time Google sign-ins cannot fork one person into
+    two accounts.
+
+    `password_hash=''` creates a PASSWORD-LESS account (Sign in with Google,
+    LIBRARY.md Part 1). Nothing hashes to the empty string, and the password
+    login path refuses it outright rather than comparing against it.
     """
     with contextlib.closing(_connect()) as conn:
         _ensure_schema(conn)
         try:
             conn.execute(
-                "INSERT INTO users (id, email, password_hash, created_at)"
-                " VALUES (?, ?, ?, ?)",
-                (user_id, email, password_hash, _now()),
+                "INSERT INTO users (id, email, password_hash, google_sub, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (user_id, email, password_hash, google_sub, _now()),
             )
         except sqlite3.IntegrityError:
             return None
@@ -451,6 +551,47 @@ def get_user_by_email(email: str) -> dict | None:
         _ensure_schema(conn)
         row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
     return None if row is None else _user_dict(row)
+
+
+def get_user_by_google_sub(google_sub: str) -> dict | None:
+    """The account a Google identity signs into, else None.
+
+    An empty sub matches NOBODY, and the guard lives here rather than in each
+    caller: '' is the value every password-only row carries, so a query built
+    from an absent claim would otherwise hand back somebody else's account.
+    """
+    if not google_sub:
+        return None
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM users WHERE google_sub = ?", (google_sub,)
+        ).fetchone()
+    return None if row is None else _user_dict(row)
+
+
+def link_google_sub(user_id: str, google_sub: str) -> bool:
+    """Attach a Google identity to an account that has none. True = we linked.
+
+    Guarded twice, and both guards matter. `google_sub = ''` in the WHERE
+    clause means a link only ever FILLS an empty slot — an account already
+    signed in with one Google identity is never re-pointed at another by a
+    later request. The partial UNIQUE index means the same identity cannot be
+    attached to a second account, so two concurrent links race in SQLite and
+    exactly one wins; the loser is told so instead of silently forking.
+    """
+    if not google_sub:
+        return False
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        try:
+            cur = conn.execute(
+                "UPDATE users SET google_sub = ? WHERE id = ? AND google_sub = ''",
+                (google_sub, user_id),
+            )
+        except sqlite3.IntegrityError:
+            return False
+    return cur.rowcount == 1
 
 
 def get_user_by_id(user_id: str) -> dict | None:
@@ -735,3 +876,308 @@ def finalize_job(
             conn.execute("ROLLBACK")
             raise
     return won
+
+
+# --------------------------------------------------------------------------- #
+# The clip library (LIBRARY.md Part 2).
+#
+# Two lifetimes in one row, and keeping them apart is the entire design: the
+# METADATA is permanent — it is deleted only when the owner deletes the clip or
+# the account goes — while the FILE lives until `expires_at`, after which the
+# reaper unlinks it and blanks `file_path`. Nothing here deletes a row on a
+# timer, and nothing here is derived from the jobs table: a job is reaped after
+# 48 h and its library rows carry on without it.
+# --------------------------------------------------------------------------- #
+
+
+def clip_expires_at(created_at: str, retention_days: int | None) -> str:
+    """When a clip's FILE expires: ``created_at + retention_days``, or ''.
+
+    '' means never (the enterprise window, ``retention_days=None``) and is the
+    value every comparison here treats as the LATEST possible expiry — never as
+    "expired long ago", which is what an empty string sorts like.
+
+    An unparseable ``created_at`` cannot produce an honest deadline, so it
+    yields '' as well: keeping a file we cannot date is a storage bill, while
+    deleting it on a guess is somebody's clip.
+    """
+    if retention_days is None:
+        return ""
+    try:
+        created = datetime.fromisoformat(created_at)
+    except ValueError:
+        return ""
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    expires = created.astimezone(timezone.utc) + timedelta(days=int(retention_days))
+    return expires.isoformat(timespec="milliseconds")
+
+
+def _clip_dict(row: sqlite3.Row) -> dict:
+    """One clips row as a plain dict, with the JSON columns parsed.
+
+    `hooks` and `words` are stored as JSON text. A row whose JSON is somehow
+    unreadable degrades to an empty list rather than raising: the library must
+    still list, and a card with no hooks beats an account page that 500s.
+    """
+    clip = {key: row[key] for key in _CLIP_COLUMNS}
+    for key in ("hooks", "words"):
+        raw = clip.get(key) or ""
+        try:
+            value = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            value = []
+        clip[key] = value if isinstance(value, list) else []
+    return clip
+
+
+def create_clip(
+    clip_id: str,
+    *,
+    user_id: str,
+    engine: str,
+    clip_index: int = 0,
+    job_id: str = "",
+    title: str = "",
+    score: int = 0,
+    hooks: list | None = None,
+    reason: str = "",
+    tip: str = "",
+    start: float = 0.0,
+    end: float = 0.0,
+    duration: float = 0.0,
+    width: int = 0,
+    height: int = 0,
+    speaker_count: int = 0,
+    words: list | None = None,
+    file_path: str = "",
+    size_bytes: int = 0,
+    retention_days: int | None = None,
+) -> dict:
+    """Insert one library row and return it.
+
+    ``retention_days`` comes from the owner's plan AT THIS MOMENT and is turned
+    into a concrete ``expires_at`` here, rather than being stored and re-read
+    later: a plan change must be able to EXTEND an existing clip (see
+    extend_clip_expiry) without ever being able to shorten one, and a stored
+    window would silently do both the moment somebody downgraded.
+    """
+    now = _now()
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO clips (id, user_id, job_id, clip_index, title, score,"
+            " hooks, reason, tip, start, \"end\", duration, width, height,"
+            " speaker_count, words, engine, file_path, bytes, created_at,"
+            " expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " ?, ?, ?, ?, ?, ?)",
+            (
+                clip_id,
+                user_id,
+                job_id,
+                int(clip_index),
+                title,
+                int(score),
+                json.dumps(list(hooks or []), ensure_ascii=False),
+                reason,
+                tip,
+                float(start),
+                float(end),
+                float(duration),
+                int(width),
+                int(height),
+                int(speaker_count),
+                json.dumps(list(words or []), ensure_ascii=False),
+                engine,
+                file_path,
+                int(size_bytes),
+                now,
+                clip_expires_at(now, retention_days),
+            ),
+        )
+    clip = get_clip(clip_id)
+    assert clip is not None
+    return clip
+
+
+def get_clip(clip_id: str) -> dict | None:
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
+    return None if row is None else _clip_dict(row)
+
+
+def get_clip_by_file(user_id: str, file_path: str) -> dict | None:
+    """One account's clip stored at ``file_path``, else None.
+
+    Scoped to the owner on purpose: this is what serves a link built from a
+    job id and a clip name after the job row itself has been reaped, so it must
+    never be able to answer with somebody else's row.
+    """
+    if not user_id or not file_path:
+        return None
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM clips WHERE user_id = ? AND file_path = ?",
+            (user_id, file_path),
+        ).fetchone()
+    return None if row is None else _clip_dict(row)
+
+
+def clip_file_referenced(file_path: str) -> bool:
+    """Does a live library row still point at this stored file?
+
+    The question every cleanup path must ask before it deletes anything under
+    the library root. Library files live outside ``clips_dir`` precisely so the
+    job sweeps cannot reach them, and this is the second lock on the same door.
+    """
+    if not file_path:
+        return False
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT 1 FROM clips WHERE file_path = ? LIMIT 1", (file_path,)
+        ).fetchone()
+    return row is not None
+
+
+def list_clips(
+    user_id: str, *, limit: int = 20, before: str = "", before_id: str = ""
+) -> list[dict]:
+    """One account's clips, newest first, cursor-paginated on ``created_at``.
+
+    The cursor is the last item's ``created_at``, with its ``id`` as a
+    tiebreak: clips rendered by one job are written milliseconds apart and can
+    share a timestamp, and a page boundary landing inside such a group would
+    silently drop the rest of it. Ordering and cursor use the same
+    (created_at, id) pair, so every row appears on exactly one page.
+
+    ``limit`` is clamped to 50 HERE rather than in the route, so no caller —
+    route, worker, or future script — can ask the database for more.
+    """
+    count = max(1, min(int(limit), 50))
+    sql = "SELECT * FROM clips WHERE user_id = ?"
+    params: list[object] = [user_id]
+    if before:
+        if before_id:
+            sql += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+            params += [before, before, before_id]
+        else:
+            sql += " AND created_at < ?"
+            params.append(before)
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+    params.append(count)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(sql, params).fetchall()
+    return [_clip_dict(row) for row in rows]
+
+
+def library_bytes(user_id: str) -> int:
+    """Bytes of stored clip FILES this account is currently holding.
+
+    Rows whose file has been reaped weigh nothing — the ceiling is about disk,
+    and their disk is already back. `bytes` stays on the row as metadata.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT COALESCE(SUM(bytes), 0) AS total FROM clips"
+            " WHERE user_id = ? AND file_path != ''",
+            (user_id,),
+        ).fetchone()
+    return 0 if row is None else int(row["total"] or 0)
+
+
+def list_expired_clips(now_iso: str) -> list[dict]:
+    """Clips whose FILE has outlived its window (the library reaper's query).
+
+    '' expires_at is unlimited and excluded by the WHERE clause rather than by
+    a comparison — as text it sorts before every real timestamp, so an
+    `expires_at <= now` alone would reap exactly the clips that must never be
+    reaped.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT id, user_id, file_path, expires_at FROM clips"
+            " WHERE file_path != '' AND expires_at != '' AND expires_at <= ?",
+            (now_iso,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "user_id": r["user_id"],
+            "file_path": r["file_path"],
+            "expires_at": r["expires_at"],
+        }
+        for r in rows
+    ]
+
+
+def clear_clip_file(clip_id: str) -> bool:
+    """Blank a clip's ``file_path`` — the file is gone, the row is not.
+
+    True when this call did it. Guarded on the path still being set so a repeat
+    sweep is a no-op rather than a second (harmless but lying) write.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute(
+            "UPDATE clips SET file_path = '' WHERE id = ? AND file_path != ''",
+            (clip_id,),
+        )
+    return cur.rowcount == 1
+
+
+def delete_clip(clip_id: str) -> bool:
+    """Remove a library row outright. True when a row was actually removed.
+
+    The ONLY thing that deletes a row (the owner asking, via
+    ``DELETE /v1/clips/{id}``). Nothing on a timer calls this.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+    return cur.rowcount == 1
+
+
+def extend_clip_expiry(user_id: str, retention_days: int | None) -> int:
+    """Re-stamp an account's clips with a retention window. EXTENDS ONLY.
+
+    Returns how many rows moved. Called after a plan change (billing.py), and
+    the asymmetry is the decision LIBRARY.md makes explicitly:
+
+    * an upgrade recomputes every non-expired clip from its own ``created_at``
+      and keeps the LATER of the two deadlines, so a creator who upgrades today
+      keeps what they already made for the longer window;
+    * a downgrade computes an earlier deadline, which loses the comparison and
+      writes nothing. Taking away something already made is a support ticket,
+      and the storage is already spent. New clips get the new plan's window.
+
+    Already-expired clips are skipped: their file is gone, so a longer window
+    would restore nothing and would only make ``available: false`` rows claim a
+    future they no longer have. '' (unlimited) is the latest possible value on
+    both sides of the comparison — it never loses and is never overwritten.
+    """
+    now = _now()
+    changed = 0
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT id, created_at, expires_at FROM clips WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        for row in rows:
+            current = str(row["expires_at"] or "")
+            if not current or current <= now:
+                continue  # already unlimited, or already reaped
+            fresh = clip_expires_at(str(row["created_at"]), retention_days)
+            if fresh and fresh <= current:
+                continue  # the new plan is shorter — leave the clip alone
+            conn.execute(
+                "UPDATE clips SET expires_at = ? WHERE id = ?", (fresh, row["id"])
+            )
+            changed += 1
+    return changed

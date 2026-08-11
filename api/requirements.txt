@@ -13,6 +13,18 @@ opencv-python-headless<5
 # installed at build time; webhook signature verification is offline crypto,
 # so tests exercise it for real with no network.
 stripe>=15,<16
+# Sign in with Google (LIBRARY.md Part 1): ID token verification. Pinned to
+# the major installed at build time. Hand-rolling JWKS + RS256 is the kind of
+# code that is quietly wrong for a year and this is an auth boundary, so the
+# signature check is the library's; only the key-set cache and the claim rules
+# are ours. Offline crypto — tests verify real signatures with no network.
+google-auth>=2,<3
+# Arrives WITH google-auth, which requires it, but googleid.py imports it
+# directly for the one step google-auth does not cover: turning a JWK's
+# modulus and exponent into the PEM its verifier takes. A direct import is a
+# direct dependency, so it is declared rather than assumed. No upper pin: the
+# RSAPublicNumbers API this uses has been stable for the life of the package.
+cryptography>=41
 # boto3 lives here (not worker-only) because BOTH roles need it in S3 mode
 # (CC_STORAGE=s3): the api mints presigned PUT/GET URLs, the worker uploads
 # clips + stages the source. One image, so one place to declare it. Pulls in

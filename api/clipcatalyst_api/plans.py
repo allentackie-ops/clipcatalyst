@@ -21,20 +21,45 @@ class Plan:
     # pricing page sells them as two promises, and reading one off the other
     # would silently re-price whichever moves first.
     brand_kit: bool
+    # How long a rendered clip's FILE is kept in the library; None = forever
+    # (LIBRARY.md Part 2). Its own field for the same reason as brand_kit, and
+    # a sharper one: retention is the promise that decides when we delete
+    # somebody's video, so it is never derived from clips_per_month, from the
+    # watermark, or from "is this a paid plan" — those move for pricing
+    # reasons, and a pricing change must never quietly shorten how long we
+    # keep what people already made. The clip's METADATA is permanent
+    # regardless; this is the file's lifetime only.
+    retention_days: int | None
 
 
 PLANS: dict[str, Plan] = {
     "free": Plan(
-        clips_per_month=3, max_height=1280, watermark_required=True, brand_kit=False
+        clips_per_month=3,
+        max_height=1280,
+        watermark_required=True,
+        brand_kit=False,
+        retention_days=7,
     ),
     "starter": Plan(
-        clips_per_month=30, max_height=1920, watermark_required=False, brand_kit=True
+        clips_per_month=30,
+        max_height=1920,
+        watermark_required=False,
+        brand_kit=True,
+        retention_days=30,
     ),
     "pro": Plan(
-        clips_per_month=100, max_height=3840, watermark_required=False, brand_kit=True
+        clips_per_month=100,
+        max_height=3840,
+        watermark_required=False,
+        brand_kit=True,
+        retention_days=90,
     ),
     "enterprise": Plan(
-        clips_per_month=None, max_height=3840, watermark_required=False, brand_kit=True
+        clips_per_month=None,
+        max_height=3840,
+        watermark_required=False,
+        brand_kit=True,
+        retention_days=None,
     ),
 }
 

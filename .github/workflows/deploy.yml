@@ -35,6 +35,11 @@ jobs:
           # the site builds exactly as it does today. Set it to the API's
           # public origin to light up cloud clipping, accounts, and billing.
           NEXT_PUBLIC_CLOUD_API: ${{ vars.CLOUD_API }}
+          # Repository variable GOOGLE_CLIENT_ID — the same OAuth client id the
+          # API verifies ID tokens against (CC_GOOGLE_CLIENT_ID). Unset = the
+          # "Sign in with Google" button never renders and Google's script is
+          # never loaded; email and password are unaffected either way.
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./out

@@ -51,10 +51,62 @@ row so `GET /jobs/{id}` can stream honest progress.
   downgrade must never strand somebody's logo on our disk.
 - `GET /v1/me/brand/logo` — the stored logo (session-only, `nosniff` +
   `default-src 'none'` because an uploaded SVG is markup).
-- `GET /v1/me` also returns `brand` (the kit, logo as a URL) and
-  `entitlements.brand_kit`.
+- `POST /v1/auth/google` body `{id_token}` — the ID token Google Identity
+  Services hands the browser. Verified for real against Google's JWKS
+  (cached, refetched on an unknown `kid`): signature, `iss`, `aud ==
+  CC_GOOGLE_CLIENT_ID`, `exp`/`nbf` with ≤ 60 s skew, and `email_verified`
+  REQUIRED. Finds the account by `google_sub`, else LINKS one whose email
+  matches, else creates a password-less one (`password_hash = ''`, which
+  `/v1/auth/login` refuses outright). Mints the same session `/v1/auth/login`
+  does, under the same rate limiter. `503` when CC_GOOGLE_CLIENT_ID is unset.
+  → `{token, user}`
+- `GET /v1/clips?limit=&before=` (session) — the clip library, newest first,
+  ≤ 50 per page. `before` is the opaque cursor the previous page returned
+  (`created_at` + the row's id, because one render writes several clips in the
+  same millisecond). Each item carries `available` (the FILE is still here)
+  and a `url` only when available; the metadata is there either way.
+- `GET /v1/clips/{id}` (session, owner only, 404 otherwise) — one clip with its
+  transcript. `DELETE /v1/clips/{id}` removes the row AND the file, and is the
+  only thing that deletes a row.
+- `GET /v1/clips/{id}/file` — the saved video (local mode serves it; S3 mode
+  redirects to a presigned GET). `404` once retention has taken the file, with
+  a body that says so rather than pretending the clip never existed.
+- `POST /v1/clips/upload` (session) multipart `file` + `metadata` (JSON) —
+  saves a clip the BROWSER rendered, only ever on an explicit click. The
+  container is SNIFFED from the bytes (MP4/WebM), the size is counted as it
+  streams (`CC_MAX_CLIP_BYTES`, 413 over), `engine` is forced to `browser`,
+  and `expires_at` comes from the current plan. It costs NO monthly quota —
+  nothing rendered on our hardware — so it is bounded instead by
+  `CC_LIBRARY_MAX_BYTES` of stored files per account (402 over).
+- `GET /v1/me` also returns `brand` (the kit, logo as a URL),
+  `entitlements.brand_kit`, `entitlements.retention_days` (how long saved
+  clips are kept; `null` = forever), and `auth_methods` (`["password"]`,
+  `["google"]`, or both — the account page never offers "change password"
+  without one).
 - `GET /v1/healthz` → `{ok, version, queue: "redis"|"eager", storage,
   transcriber}`
+
+## The clip library (LIBRARY.md Part 2)
+
+Its own `clips` table, deliberately not the `jobs` row: jobs carry pipeline
+state and are reaped at `CC_JOB_TTL_HOURS`, the library outlives them. Two
+lifetimes share the row — the METADATA (title, score, hooks, transcript) is
+permanent and dies only when the owner deletes the clip, while the FILE lives
+until `expires_at = created_at + the owner plan's retention_days` (free 7,
+starter 30, pro 90, enterprise forever). `worker.reap_expired_clips` deletes
+the file and blanks `file_path`, keeping the row, which then lists with
+`available: false`. A plan change EXTENDS every non-expired clip and never
+shortens one (`billing.sync_clip_retention` → `db.extend_clip_expiry`).
+
+Saved clips live under `settings.library_dir`, NOT under `clips_dir`. Two paths
+`rmtree(clips_dir / job_id)` — the 48 h job reaper and `worker._discard_output`
+— and a library file inside that tree would be destroyed by a sweep that knows
+nothing about libraries. Separate roots make that structural; on top of it,
+`_discard_output` refuses to delete any file a live library row still
+references (`db.clip_file_referenced`), because "the job row is gone" is also
+what a reaped job looks like. The rows themselves are written only after the
+`processing → done` transition is WON, so a run that lost its claim — whose
+clips were refunded — cannot file them in anybody's library.
 
 ## Modules & contracts
 
@@ -104,13 +156,18 @@ row so `GET /jobs/{id}` can stream honest progress.
   `-map [v] -map 0:a?`, W/H/X/Y from `brandkit.logo_box`. Unbranded renders
   build the identical argv they always did.
 - `db.py`: SQLite (WAL) at `settings.db_path`; plain sqlite3, tiny DAO:
-  `create_job, get_job, update_job(**fields), set_clips(job_id, clips)`.
-  Thread/process safe via short-lived connections.
+  `create_job, get_job, update_job(**fields), set_clips(job_id, clips)`, plus
+  the library half — `create_clip, get_clip, list_clips (cursor paginated),
+  library_bytes, list_expired_clips, clear_clip_file, delete_clip,
+  extend_clip_expiry`. Thread/process safe via short-lived connections.
 - `storage.py`: `LocalStorage(root)` and `S3Storage(bucket, prefix)`
   behind one interface: `upload_target(job_id) -> UploadTarget`,
   `source_path(job_id) -> Path` (downloads from S3 to tmp when needed),
   `put_clip(job_id, path, name) -> stored key`, `clip_url(job_id, name) ->
-  str` (local: `/v1/files/...`; S3: presigned GET). boto3 imported lazily.
+  str` (local: `/v1/files/...`; S3: presigned GET). The library has its own
+  four calls and its own root: `put_library_clip(user_id, name, path) ->
+  file_path`, `library_clip_file`, `library_clip_url`, `delete_library_clip`.
+  boto3 imported lazily.
 - `queue_app.py`: Celery app named `clipcatalyst`, broker/backend from
   `settings.redis_url`; `task_always_eager` when `CC_QUEUE=eager` (tests +
   single-box dev without Redis).
@@ -137,4 +194,5 @@ CC_DATA_DIR, CC_DB_PATH, CC_STORAGE (local|s3), CC_S3_BUCKET/PREFIX/REGION,
 CC_REDIS_URL, CC_QUEUE (redis|eager), CC_TRANSCRIBER (faster-whisper|fake),
 CC_WHISPER_MODEL, CC_WHISPER_DEVICE, CC_WHISPER_COMPUTE, CC_FFMPEG_BIN,
 CC_FFPROBE_BIN, CC_CORS_ORIGINS, CC_MAX_UPLOAD_BYTES, CC_PUBLIC_BASE_URL,
-CC_FAKE_TRANSCRIPT_PATH.
+CC_FAKE_TRANSCRIPT_PATH, CC_MAX_CLIP_BYTES, CC_LIBRARY_MAX_BYTES.
+Clip RETENTION is deliberately not an env var — it is a plan entitlement.

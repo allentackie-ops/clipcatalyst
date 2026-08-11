@@ -26,12 +26,28 @@ const ROWS: Row[] = [
     cells: [{ kind: "yes" }, { kind: "no" }],
   },
   {
-    feature: "Account required",
-    cells: [{ kind: "no" }, { kind: "yes" }],
+    feature: "Runs without an account",
+    cells: [{ kind: "yes" }, { kind: "no" }],
   },
   {
-    feature: "Video leaves your device",
-    cells: [{ kind: "no" }, { kind: "yes" }],
+    feature: "Video stays on your device",
+    cells: [{ kind: "yes" }, { kind: "no" }],
+  },
+  {
+    feature: "Face-tracked 9:16 reframing",
+    cells: [{ kind: "yes" }, { kind: "yes" }],
+  },
+  {
+    feature: "Word-level captions, coloured per speaker",
+    cells: [{ kind: "yes" }, { kind: "yes" }],
+  },
+  {
+    feature: "Hook suggestions + 0–100 scoring",
+    cells: [{ kind: "yes" }, { kind: "yes" }],
+  },
+  {
+    feature: "Chat-based editing",
+    cells: [{ kind: "yes" }, { kind: "no" }],
   },
   {
     feature: "Clips per run",
@@ -68,29 +84,13 @@ const ROWS: Row[] = [
       { kind: "text", value: "2 GB per upload" },
     ],
   },
-  {
-    feature: "Chat-based editing",
-    cells: [{ kind: "yes" }, { kind: "no" }],
-  },
 ];
 
-const GAPS: { name: string; gap: string }[] = [
-  {
-    name: "Desktop only",
-    gap: "Phones and tablets get an honest card instead of a run. One mobile tab will not give a full transcription and render the memory they need.",
-  },
-  {
-    name: "Watermarked",
-    gap: "Every browser clip carries the ClipCatalyst mark. Turning it off is a paid cloud entitlement, and the cloud is not switched on yet.",
-  },
-  {
-    name: "Short sources",
-    gap: "20 minutes and 1.4 GB is the ceiling — the browser holds the whole file in memory. Hour-long episodes are what the cloud is for.",
-  },
-  {
-    name: "No publishing",
-    gap: "There is no posting, scheduling, or platform integration. You download the MP4, or hand it to your phone's native share sheet.",
-  },
+const SCOPE: { name: string; detail: string }[] = [
+  { name: "Desktop", detail: "a phone tab cannot hold a transcription and a render" },
+  { name: "Watermarked", detail: "removing it is a paid cloud entitlement" },
+  { name: "20 min · 1.4 GB", detail: "the browser holds the whole file in memory" },
+  { name: "No publishing", detail: "you download the MP4 or use your phone's share sheet" },
 ];
 
 function CheckMark() {
@@ -162,10 +162,11 @@ export default function Comparison() {
           eyebrow="Two engines"
           title={
             <>
-              What each engine <span className="whitespace-nowrap">actually does</span>
+              Everything here runs{" "}
+              <span className="whitespace-nowrap">on your machine</span>
             </>
           }
-          lede="ClipCatalyst has two engines and they are not the same product. One runs entirely in your browser and works right now. The other runs on a GPU, needs an account, and has not been switched on."
+          lede="Transcription, scoring, face tracking, captions and chat editing all ship today and all run in your browser — no account, no upload, no queue. The cloud pipeline below is built and tested for longer footage and bigger exports; it is not switched on yet."
         />
 
         <div className="relative mt-14 md:mt-16">
@@ -230,19 +231,20 @@ export default function Comparison() {
           live.
         </p>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {GAPS.map(({ name, gap }) => (
-            <Card key={name} className="p-5">
-              <p className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.2em] text-zinc-500">
-                Known limit
-              </p>
-              <h3 className="mt-2 font-display text-base font-semibold text-white">
-                {name}
-              </h3>
-              <p className="mt-2 text-sm leading-relaxed text-zinc-400">{gap}</p>
-            </Card>
-          ))}
-        </div>
+        <Card className="mt-8 p-5 sm:p-6">
+          <p className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.2em] text-zinc-500">
+            Worth knowing before you start
+          </p>
+          <ul className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-8 sm:gap-y-2">
+            {SCOPE.map(({ name, detail }) => (
+              <li key={name} className="flex items-baseline gap-2 text-sm">
+                <span className="font-medium text-zinc-200">{name}</span>
+                <span className="text-zinc-500">&mdash; {detail}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
       </Container>
     </section>
   );

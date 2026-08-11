@@ -2,36 +2,36 @@ import { Container, SectionHeading } from "@/components/ui";
 
 const faqs: { q: string; a: string }[] = [
   {
-    q: "How is 90-second processing actually possible?",
-    a: "The cloud pipeline runs all seven layers — transcription, scoring, reframing, captioning — on optimized GPU clusters in parallel, not one stage at a time. Intelligent caching means repeat runs on the same footage are even faster. Median target from upload to first finished clip: under 90 seconds, versus 10–20 minutes for OpusClip or Klap.",
+    q: "How long does a run actually take?",
+    a: "In the browser, render time tracks the clips you asked for rather than the video you fed in: clips are captured in real time, so two 30-second clips take at least a minute to write, plus transcription up front. There is no upload and no queue, so that is the entire wait. The cloud pipeline is designed for roughly 2–3 minutes on a T4 GPU — that is an engineering target, not a measurement. It has never been run on real hardware, so we do not quote a median.",
   },
   {
     q: "How accurate is the clip selection?",
-    a: "Every candidate moment is scored 0–100 by the virality engine using audio analysis (laughter spikes, dramatic pauses), transcript semantics, and platform trend data — and each clip ships with concrete improvement tips, so nothing is a black box. When it does miss, one chat message like “cut in two seconds later” fixes it.",
+    a: "Every candidate window is scored 0–100 on six components: hook strength, idea density, vocal energy, whether it ends on a finished thought, whether it starts inside the intro, and how much dead air it carries. The scoring is deterministic — the same video always yields the same clips — and each clip ships with the reason it scored that way plus the single fix that would help it most. When it misses, one message like “start 2 seconds later” moves it.",
   },
   {
-    q: "What formats and lengths can I upload?",
-    a: "MP4, MOV, AVI, and WebM up to 10GB per file — enough for a 3-hour podcast. You can also paste a YouTube link or connect Drive and Dropbox. Output clips come in 15, 30, or 60-second cuts, reframed to 9:16 with face tracking.",
+    q: "What can I feed it, and what comes out?",
+    a: "MP4, MOV, and WebM. The browser holds the whole file in memory, so sources cap at 20 minutes and 1.4 GB — trim a long episode first. Out come 1 to 3 clips per run at 15, 30, or 60 seconds, reframed to 9:16 with face tracking, at up to 1080×1920. There is no YouTube-link import and no Drive or Dropbox connection: you pick a file off your own disk.",
   },
   {
     q: "Do exported clips have a watermark?",
-    a: "Only on the Free tier — $0 for 3 clips a month at 720p, available at launch. Starter at $19/mo removes the watermark and unlocks 1080p plus your brand kit; Pro at $49/mo exports up to 4K.",
+    a: "Yes. Every clip the browser Studio produces carries the ClipCatalyst mark, signed in or not. Turning it off is an entitlement on the paid cloud plans, and cloud rendering is not switched on yet — so today the honest answer is watermarked, unlimited, and free.",
   },
   {
-    q: "How does XML export work with Premiere or Resolve?",
-    a: "Pro plans export a timeline XML alongside every clip — cuts, reframe keyframes, and caption layers intact. Open it in Premiere, Resolve, or Final Cut and keep working on your own timeline. The AI does the first 95%; you keep full control of the last 5%.",
+    q: "What can't it do yet?",
+    a: "No timeline or XML export to Premiere, Resolve, or Final Cut. No B-roll, no brand kit, no custom fonts or colors. No team accounts, analytics, or A/B testing. No posting or scheduling. No public API. If a capability is not described on this page, assume it is not built — we would rather you find that out here than after paying.",
   },
   {
     q: "Which platforms can I publish to?",
-    a: "One-click publish to TikTok, YouTube Shorts, and Instagram Reels, with platform-specific optimization applied per destination. You can also schedule posts, download files up to 4K, or share a review link with your team before anything goes live.",
+    a: "None directly — there is no posting or scheduling integration. You download the MP4, or press share, which opens your device's native share sheet; on a phone that puts TikTok, YouTube, and Instagram one tap away. Clips come out 9:16, so they fit all three without further work.",
   },
   {
-    q: "What can the free Studio beta do right now?",
-    a: "Studio runs Whisper AI and the virality engine entirely in your browser — your video never leaves your device. Give it a talking video (15 minutes or less works best) and it cuts 9:16 captioned clips, each scored 0–100. The 90-second cloud pipeline that chews through hour-long podcasts is coming next.",
+    q: "What does the free Studio do right now?",
+    a: "Everything on this page that is not labelled cloud, with unlimited runs and no account: Whisper transcription, speaker separation, moment scoring, face-tracked 9:16 reframing, word-level captions, hook suggestions, and chat editing — all inside the tab. It needs a desktop browser (Chrome, Edge, or Firefox). Phones and tablets get a card explaining why, rather than a run that dies halfway through.",
   },
   {
     q: "Who owns my footage?",
-    a: "You do — always. Source video is never shared or resold, and finished clips inform the virality model only in aggregate, with a one-click opt-out. Delete a project and it is gone from our servers.",
+    a: "You do. In the browser Studio the question barely arises: the file never leaves your device, there is no account, and nothing is transmitted to us — so there is nothing for us to hold, share, or resell. When cloud rendering goes live, uploads and rendered clips are reaped automatically 48 hours after a job. Nothing trains a model either way; the scoring engine is a fixed weighting, not something that learns from your video.",
   },
 ];
 

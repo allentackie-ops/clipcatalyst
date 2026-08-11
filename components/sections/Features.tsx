@@ -339,13 +339,13 @@ export default function Features() {
 
         <div className="mt-14 md:mt-16">
           <GroupHeading
-            badge="Pro"
+            badge="Cloud"
             tone="spark"
-            label="The differentiators"
-            count={PRO_FEATURES.length}
+            label="Built, not switched on"
+            count={CLOUD_FEATURES.length}
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {PRO_FEATURES.map((feature) => (
+            {CLOUD_FEATURES.map((feature) => (
               <ProCard key={feature.name} feature={feature} />
             ))}
           </div>

@@ -13,34 +13,34 @@ type Step = {
 const STEPS: Step[] = [
   {
     num: "01",
-    name: "Upload",
-    desc: "Paste a YouTube link, drop a file up to 10GB — MP4, MOV, AVI, WebM — or connect Drive or Dropbox.",
+    name: "Add a video",
+    desc: "Drop in an MP4, MOV, or WebM — up to 20 minutes and 1.4 GB. It stays on your machine; nothing is uploaded.",
     dot: "bg-brand-400 shadow-[0_0_12px_rgba(167,139,250,0.7)]",
   },
   {
     num: "02",
     name: "Configure",
-    desc: "Pick platforms, clip length — 15, 30, or 60s — your brand kit, and the vibe. Or skip straight past it.",
+    desc: "Pick clip length — 15, 30, or 60s — how many clips (1–3), and export quality up to 1080p. Or skip straight past it.",
     dot: "bg-brand-400 shadow-[0_0_12px_rgba(167,139,250,0.7)]",
     optional: true,
   },
   {
     num: "03",
-    name: "AI processes",
-    desc: "The engine finds, cuts, captions, and scores every moment. Preview clips live as they finish.",
+    name: "Studio processes",
+    desc: "Transcribes, separates speakers, scores every candidate moment, reframes to 9:16, and renders — all in this tab.",
     dot: "bg-spark-400 shadow-[0_0_12px_rgba(232,121,249,0.7)]",
     progressMock: true,
   },
   {
     num: "04",
     name: "Review & edit",
-    desc: "Check each 0–100 virality score, trim in the built-in editor, or just type the change in chat.",
+    desc: "Check each 0–100 score and the one fix it suggests, then type the change: pauses, pace, zooms, trims, hooks.",
     dot: "bg-ember-400 shadow-[0_0_12px_rgba(251,191,36,0.7)]",
   },
   {
     num: "05",
-    name: "Publish",
-    desc: "Download up to 4K, one-click post to TikTok, Shorts, and Reels, schedule, or share a review link.",
+    name: "Download",
+    desc: "Save the MP4 at up to 1080p, or hand it to your phone's native share sheet and post from there.",
     dot: "bg-signal-400 shadow-[0_0_12px_rgba(52,211,153,0.7)]",
   },
 ];
@@ -53,10 +53,10 @@ export default function HowItWorks() {
           eyebrow="From VOD to viral"
           title={
             <>
-              Upload to <GradientText>posted</GradientText> in five steps
+              Dropped file to <GradientText>finished clip</GradientText>
             </>
           }
-          lede="Five steps from raw footage to a clip on your feed. One is optional, and the engine handles the heavy one in about 90 seconds."
+          lede="Five steps from a video on your desk to a captioned vertical clip in your downloads. One of them is optional, and every one of them runs inside your browser."
         />
 
         <div className="relative mt-16">
@@ -104,15 +104,15 @@ export default function HowItWorks() {
                     <div className="mt-auto pt-4">
                       <div className="rounded-lg border border-line bg-ink-900/80 p-2.5">
                         <div className="flex items-center justify-between gap-2 font-mono text-[10px] text-zinc-500">
-                          <span className="truncate">clip 5/8</span>
+                          <span className="truncate">clip 2/3</span>
                           <span className="shrink-0 text-brand-300">
-                            ~90s remaining
+                            rendering
                           </span>
                         </div>
                         <div
                           className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"
                           role="img"
-                          aria-label="Processing progress: 62 percent, about 90 seconds remaining"
+                          aria-label="Processing progress: 62 percent, rendering clip 2 of 3"
                         >
                           <div className="h-full w-[62%] animate-pulse-soft rounded-full bg-gradient-to-r from-brand-500 to-spark-500" />
                         </div>
@@ -125,9 +125,9 @@ export default function HowItWorks() {
           </ol>
 
           <p className="mt-12 text-center font-mono text-xs text-zinc-500">
-            median time from upload to first clip{" "}
+            all five steps run in your browser{" "}
             <span className="text-zinc-700">·</span>{" "}
-            <span className="text-signal-400">&lt;90s</span>
+            <span className="text-signal-400">nothing uploaded</span>
           </p>
         </div>
       </Container>

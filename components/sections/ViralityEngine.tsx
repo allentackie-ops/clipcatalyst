@@ -32,9 +32,9 @@ const CAPABILITIES: {
   icon: ReactNode;
 }[] = [
   {
-    name: "Platform-specific optimization",
+    name: "Deterministic by design",
     blurb:
-      "Tunes each clip for TikTok, Reels, or Shorts — three feeds, three trend models, zero one-size-fits-all.",
+      "Same video in, same clips out. The score is a fixed weighting you can re-run, not a model that drifts between attempts.",
     tile: "border-brand-500/25 bg-gradient-to-br from-brand-500/20 to-brand-500/5 text-brand-300",
     icon: (
       <svg
@@ -55,9 +55,9 @@ const CAPABILITIES: {
     ),
   },
   {
-    name: "Hook generation",
+    name: "Hook ranking",
     blurb:
-      "Writes 5 scroll-stopping hooks per clip, then recommends the strongest — with the retention math to back it.",
+      "Ranks the clip's own strongest opening lines and puts up to five in front of you, best first. Swap between them by chat.",
     tile: "border-spark-500/25 bg-gradient-to-br from-spark-500/20 to-spark-500/5 text-spark-400",
     icon: (
       <svg
@@ -77,9 +77,9 @@ const CAPABILITIES: {
     ),
   },
   {
-    name: "Timing optimization",
+    name: "Clean cut points",
     blurb:
-      "Finds the exact millisecond to cut in and out. Retention lives or dies in the first 400ms.",
+      "Cuts land on sentence boundaries, so a clip opens on a real start and ends on a finished thought — never mid-word.",
     tile: "border-ember-500/25 bg-gradient-to-br from-ember-500/20 to-ember-500/5 text-ember-400",
     icon: (
       <svg
@@ -101,7 +101,7 @@ const CAPABILITIES: {
   {
     name: "Audio analysis",
     blurb:
-      "Detects laughter spikes, dramatic pauses, and emotional peaks — the moments feeds reward.",
+      "Reads the energy envelope for spikes and maps the dead air, so flat delivery and long pauses cost a clip points.",
     tile: "border-signal-500/25 bg-gradient-to-br from-signal-500/20 to-signal-500/5 text-signal-400",
     icon: (
       <svg
@@ -141,7 +141,7 @@ export default function ViralityEngine() {
               <GradientText>an engine</GradientText>
             </>
           }
-          lede="Every clip gets a 0–100 virality score. Underneath it, four systems decide what to cut, what to say first, and how to say it — then tell you exactly how to push the number higher."
+          lede="Every clip gets a 0–100 score. Underneath it, four systems decide what to cut, where to cut it, and what to open with — then hand you the single fix that would help this clip most."
         />
 
         <div className="mt-16 grid items-stretch gap-10 lg:grid-cols-[1.08fr_1fr] lg:gap-12">
@@ -166,9 +166,11 @@ export default function ViralityEngine() {
             <div className="px-5 py-5 sm:px-6">
               <div className="flex items-baseline justify-between">
                 <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                  Generated hooks
+                  Ranked hooks
                 </p>
-                <p className="font-mono text-[10px] text-zinc-600">5 / clip</p>
+                <p className="font-mono text-[10px] text-zinc-600">
+                  up to 5 / clip
+                </p>
               </div>
               <ul className="mt-3 space-y-1.5">
                 {HOOKS.map((hook) => (
@@ -200,7 +202,7 @@ export default function ViralityEngine() {
                       <span className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
                         <Badge tone="signal">Recommended</Badge>
                         <span className="rounded-md bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
-                          +12 retention
+                          top ranked
                         </span>
                       </span>
                     ) : null}
@@ -216,7 +218,7 @@ export default function ViralityEngine() {
                   Timing
                 </p>
                 <p className="font-mono text-[10px] text-zinc-600">
-                  retention-optimized cut
+                  sentence-boundary cut
                 </p>
               </div>
               <div className="relative mt-3 h-2.5 rounded-full bg-ink-700">
@@ -262,9 +264,9 @@ export default function ViralityEngine() {
                 <path d="M15 6.5h6v6" />
               </svg>
               <p className="text-xs leading-relaxed text-zinc-400">
-                <span className="font-medium text-zinc-200">Tip:</span> lead
-                with the payoff. Moving the &ldquo;$40K&rdquo; line to 0:00 is
-                worth ~6 points.
+                <span className="font-medium text-zinc-200">Tip:</span> punch up
+                the first line &mdash; open on a question or a bold claim so
+                nobody scrolls past.
               </p>
             </div>
           </Card>

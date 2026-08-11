@@ -24,7 +24,7 @@ export default function FinalCTA() {
               Your next viral clip is already in your footage.
             </h2>
             <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-zinc-400 sm:text-lg">
-              Pick a video. Ninety seconds later, you&rsquo;re posting.
+              Pick a video off your own disk. It never leaves your machine.
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
@@ -44,7 +44,7 @@ export default function FinalCTA() {
                 href="/#pricing"
                 className="text-brand-300 transition-colors hover:text-white"
               >
-                See what the paid plans add &rarr;
+                See the plans, limits, and what isn&rsquo;t live yet &rarr;
               </Link>
             </p>
           </div>

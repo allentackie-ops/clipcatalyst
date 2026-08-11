@@ -68,13 +68,13 @@ const tiers: Tier[] = [
     price: "TBA",
     features: [
       "100 cloud clips / month",
-      "Up to 4K cloud export",
+      "Up to 4K cloud export (2160×3840)",
       "No watermark",
       "Browser Studio stays free and unlimited",
     ],
     limitations: [
       "Cloud rendering is not live yet",
-      "4K has not yet been run on hardware",
+      "4K upscales from landscape footage — a 9:16 crop of a 1080p source is 608px wide",
     ],
     cta: "Check availability",
     href: "/account?plan=pro",

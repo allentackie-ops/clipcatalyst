@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Six candidate logo marks for ClipCatalyst, shown at true favicon size on light and dark, with independent judge scores and a recommendation.">
+<title>ClipCatalyst — choosing the mark</title>
+<style>
+  /* ---- tokens: light is the base, dark overrides at token level only ---- */
+  :root {
+    --ground: #f7f7f8;
+    --panel: #ffffff;
+    --panel-2: #f1f1f3;
+    --line: rgba(9, 9, 11, 0.10);
+    --line-strong: rgba(9, 9, 11, 0.18);
+    --ink: #18181b;
+    --muted: #52525b;
+    --faint: #8a8a93;
+    --violet: #7c3aed;
+    --fuchsia: #c026d3;
+    --chip: rgba(124, 58, 237, 0.09);
+
+    /* specimen grounds stay fixed in BOTH themes — a mark must be judged on
+       real dark and real light, not on whatever the reader's theme is. */
+    --spec-dark: #09090b;
+    --spec-light: #fafafa;
+
+    --display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #09090b;
+      --panel: #111114;
+      --panel-2: #17171b;
+      --line: rgba(255, 255, 255, 0.09);
+      --line-strong: rgba(255, 255, 255, 0.16);
+      --ink: #fafafa;
+      --muted: #a1a1aa;
+      --faint: #71717a;
+      --violet: #a78bfa;
+      --fuchsia: #e879f9;
+      --chip: rgba(167, 139, 250, 0.12);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #09090b;
+    --panel: #111114;
+    --panel-2: #17171b;
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --ink: #fafafa;
+    --muted: #a1a1aa;
+    --faint: #71717a;
+    --violet: #a78bfa;
+    --fuchsia: #e879f9;
+    --chip: rgba(167, 139, 250, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.5rem;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--faint);
+    margin: 0;
+  }
+  h1 {
+    font-size: clamp(2rem, 7vw, 3.25rem);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    font-weight: 700;
+    margin: 0.75rem 0 0;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 4vw, 1.75rem);
+    letter-spacing: -0.02em;
+    font-weight: 650;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 { font-size: 1.05rem; letter-spacing: -0.01em; margin: 0; font-weight: 640; }
+  p { margin: 0; max-width: 62ch; }
+  .lede { color: var(--muted); font-size: 1.05rem; margin-top: 1.25rem; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.9rem; }
+
+  header .rule {
+    margin-top: 2rem;
+    height: 2px;
+    background: linear-gradient(90deg, var(--violet), var(--fuchsia) 60%, transparent);
+    border-radius: 2px;
+  }
+
+  /* ---------- specimen card ---------- */
+  .spec {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .spec.lead { border-color: color-mix(in srgb, var(--violet) 45%, transparent); }
+
+  .spec-head {
+    padding: 1.4rem 1.4rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .titleline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    background: var(--chip);
+    color: var(--violet);
+    border: 1px solid color-mix(in srgb, var(--violet) 30%, transparent);
+    white-space: nowrap;
+  }
+  .badge.plain {
+    background: transparent;
+    color: var(--faint);
+    border-color: var(--line-strong);
+  }
+
+  /* the big showing: mark on true brand ground */
+  .hero-mark {
+    background: var(--spec-dark);
+    display: grid;
+    place-items: center;
+    padding: 2.75rem 1rem;
+    background-image: radial-gradient(60% 80% at 50% 0%, rgba(139, 92, 246, 0.16), transparent 70%);
+  }
+  .hero-mark svg { width: 104px; height: 104px; }
+  .grad { color: #b57bf5; }
+
+  /* true-size strips */
+  .strips { display: grid; grid-template-columns: 1fr; }
+  @media (min-width: 40rem) { .strips { grid-template-columns: 1fr 1fr; } }
+  .strip { padding: 1.5rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+  .strip.on-dark { background: var(--spec-dark); color: #fafafa; }
+  .strip.on-light { background: var(--spec-light); color: #09090b; }
+  .strip-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.45;
+  }
+  .sizes { display: flex; align-items: flex-end; gap: 1.5rem; flex-wrap: wrap; }
+  .size { display: flex; flex-direction: column; align-items: center; gap: 0.45rem; }
+  .size span { font-family: var(--mono); font-size: 0.6rem; opacity: 0.4; }
+  .s16 { width: 16px; height: 16px; }
+  .s24 { width: 24px; height: 24px; }
+  .s32 { width: 32px; height: 32px; }
+  .s64 { width: 64px; height: 64px; }
+
+  /* in-use row: navbar lockup + app icon + tab */
+  .inuse {
+    background: var(--spec-dark);
+    padding: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .lockup { display: inline-flex; align-items: center; gap: 0.6rem; }
+  .lockup svg { width: 26px; height: 26px; color: #a78bfa; }
+  .wordmark {
+    font-size: 1.1rem; font-weight: 660; letter-spacing: -0.02em; color: #fff;
+  }
+  .wordmark em { font-style: normal; color: #a78bfa; }
+  .appicon {
+    width: 52px; height: 52px; border-radius: 13px;
+    background: linear-gradient(140deg, #8b5cf6, #d946ef);
+    display: grid; place-items: center;
+  }
+  .appicon svg { width: 28px; height: 28px; color: #fff; }
+  .tabchip {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    background: #1c1c20; border-radius: 8px 8px 0 0;
+    padding: 0.45rem 0.8rem; font-size: 0.75rem; color: #d4d4d8;
+    max-width: 100%;
+  }
+  .tabchip svg { width: 14px; height: 14px; color: #a78bfa; flex: none; }
+  .tabchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* verdict body */
+  .body { padding: 1.4rem; display: flex; flex-direction: column; gap: 1rem; }
+  .scores { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .score {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .score b { color: var(--ink); font-weight: 600; }
+  .score.win { border-color: color-mix(in srgb, var(--violet) 50%, transparent); color: var(--violet); }
+  .score.win b { color: var(--violet); }
+
+  .case { display: grid; gap: 0.9rem; }
+  @media (min-width: 44rem) { .case { grid-template-columns: 1fr 1fr; } }
+  .case > div {
+    border-left: 2px solid var(--line-strong);
+    padding-left: 0.9rem;
+  }
+  .case .for { border-left-color: var(--violet); }
+  .case h4 {
+    margin: 0 0 0.3rem;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--faint);
+    font-weight: 500;
+  }
+  .case p { font-size: 0.92rem; color: var(--muted); }
+
+  /* alternates grid */
+  .alts { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+  @media (min-width: 44rem) { .alts { grid-template-columns: 1fr 1fr; } }
+  .alt {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .alt .mini {
+    background: var(--spec-dark);
+    display: flex; align-items: center; justify-content: center; gap: 1.75rem;
+    padding: 1.75rem 1rem;
+  }
+  .alt .mini svg { color: #b57bf5; }
+  .alt .mini .m64 { width: 56px; height: 56px; }
+  .alt .mini .m16 { width: 16px; height: 16px; color: #fafafa; }
+  .alt .txt { padding: 1rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .steps { display: flex; flex-direction: column; gap: 1rem; counter-reset: q; }
+  .step {
+    display: flex; gap: 0.9rem; align-items: flex-start;
+    border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+    padding: 1.1rem 1.2rem;
+  }
+  .step .n {
+    font-family: var(--mono); font-size: 0.75rem; color: var(--violet);
+    border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent);
+    border-radius: 8px; padding: 0.15rem 0.45rem; flex: none; margin-top: 0.15rem;
+  }
+  footer { border-top: 1px solid var(--line); padding-top: 1.75rem; color: var(--muted); }
+  a { color: var(--violet); }
+  a:focus-visible, .spec:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="splice" viewBox="0 0 24 24">
+      <path d="M3.75 3 H7.5 V15 H3.75 A2.25 2.25 0 0 1 1.5 12.75 V5.25 A2.25 2.25 0 0 1 3.75 3 Z"/>
+      <path d="M9 6 H15 V18 H9 Z"/>
+      <path d="M16.5 9 H20.25 A2.25 2.25 0 0 1 22.5 11.25 V18.75 A2.25 2.25 0 0 1 20.25 21 H16.5 Z"/>
+    </symbol>
+    <symbol id="turn" viewBox="0 0 24 24">
+      <path d="M3.375 12.15H12.175A2 2 0 0 1 14.175 14.15V17.35A2 2 0 0 1 12.175 19.35H3.375A2 2 0 0 1 1.375 17.35V14.15A2 2 0 0 1 3.375 12.15ZM17.425 4.65H20.625A2 2 0 0 1 22.625 6.65V15.45A2 2 0 0 1 20.625 17.45H17.425A2 2 0 0 1 15.425 15.45V6.65A2 2 0 0 1 17.425 4.65Z"/>
+    </symbol>
+    <symbol id="arch" viewBox="0 0 24 24">
+      <path d="M3.75 9 H7.5 V21 H3.75 A2.25 2.25 0 0 1 1.5 18.75 V11.25 A2.25 2.25 0 0 1 3.75 9 Z"/>
+      <path d="M9 3 H15 V15 H9 Z"/>
+      <path d="M16.5 9 H20.25 A2.25 2.25 0 0 1 22.5 11.25 V18.75 A2.25 2.25 0 0 1 20.25 21 H16.5 Z"/>
+    </symbol>
+    <symbol id="peak" viewBox="0 0 24 24">
+      <rect x="0.6" y="12.7" width="4" height="8.8" rx="2"/>
+      <rect x="6.65" y="2.5" width="10.7" height="19" rx="2.8"/>
+      <rect x="19.4" y="14.7" width="4" height="6.8" rx="2"/>
+    </symbol>
+    <symbol id="reframe" viewBox="0 0 24 24">
+      <path fill-rule="evenodd" d="M3.375 12.15H12.175A2 2 0 0 1 14.175 14.15V17.35A2 2 0 0 1 12.175 19.35H3.375A2 2 0 0 1 1.375 17.35V14.15A2 2 0 0 1 3.375 12.15ZM4.075 14.1H11.475A0.75 0.75 0 0 1 12.225 14.85V16.65A0.75 0.75 0 0 1 11.475 17.4H4.075A0.75 0.75 0 0 1 3.325 16.65V14.85A0.75 0.75 0 0 1 4.075 14.1ZM17.425 4.65H20.625A2 2 0 0 1 22.625 6.65V15.45A2 2 0 0 1 20.625 17.45H17.425A2 2 0 0 1 15.425 15.45V6.65A2 2 0 0 1 17.425 4.65Z"/>
+    </symbol>
+    <symbol id="hold" viewBox="0 0 24 24">
+      <path d="M20.79 20.2A10.7 10.7 0 1 1 20.79 3.8L18.75 6.24A7.52 7.52 0 1 0 18.75 17.76ZM12.44 7.56H15.38A1.11 1.11 0 0 1 16.49 8.67V15.33A1.11 1.11 0 0 1 15.38 16.44H12.44A1.11 1.11 0 0 1 11.33 15.33V8.67A1.11 1.11 0 0 1 12.44 7.56Z"/>
+    </symbol>
+    <symbol id="crescendo" viewBox="0 0 24 24">
+      <rect x="0.5" y="13.6" width="2.7" height="6.8" rx="1.35"/>
+      <rect x="4.9" y="9.4" width="2.7" height="11" rx="1.35"/>
+      <rect x="9.5" y="3.7" width="9.4" height="16.7" rx="2.5"/>
+      <rect x="20.8" y="14.4" width="2.7" height="6" rx="1.35"/>
+    </symbol>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Identity · mark selection</p>
+    <h1>Fifteen marks went in. Six are worth your time.</h1>
+    <p class="lede">
+      Five designers each took a different idea about what ClipCatalyst actually
+      <em>does</em>, drew until something survived, then rendered every mark at
+      true favicon size and looked at it. Three judges scored the results
+      independently — one on whether it holds together at 16 pixels, one on
+      whether it means anything to a stranger, one on craft and whether it could
+      be confused with OpusClip or VEED. Nobody saw the others' scores.
+    </p>
+    <p class="lede">
+      Every mark below is shown the way a logo is really used: tiny, in one flat
+      colour, on both a dark and a light ground. That is where marks die.
+    </p>
+    <div class="rule"></div>
+  </header>
+
+  <!-- ===================== THE RECOMMENDATION ===================== -->
+  <section class="spec lead">
+    <div class="spec-head">
+      <div class="titleline">
+        <h2>Splice</h2>
+        <span class="badge">My recommendation</span>
+        <span class="badge plain">The transformation</span>
+      </div>
+      <p class="muted">
+        One wide video, cut into three tall clips that are sliding out of the
+        frame one after another.
+      </p>
+    </div>
+
+    <div class="hero-mark">
+      <svg viewBox="0 0 24 24" aria-label="Splice mark" role="img"><use href="#splice" fill="url(#g)"/></svg>
+    </div>
+
+    <div class="strips">
+      <div class="strip on-dark">
+        <p class="strip-label">Flat white · dark ground</p>
+        <div class="sizes">
+          <div class="size"><svg class="s16" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>16</span></div>
+          <div class="size"><svg class="s24" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>24</span></div>
+          <div class="size"><svg class="s32" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>32</span></div>
+          <div class="size"><svg class="s64" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>64</span></div>
+        </div>
+      </div>
+      <div class="strip on-light">
+        <p class="strip-label">Flat ink · light ground</p>
+        <div class="sizes">
+          <div class="size"><svg class="s16" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>16</span></div>
+          <div class="size"><svg class="s24" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>24</span></div>
+          <div class="size"><svg class="s32" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>32</span></div>
+          <div class="size"><svg class="s64" aria-hidden="true"><use href="#splice" fill="currentColor"/></svg><span>64</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="inuse">
+      <span class="lockup">
+        <svg aria-hidden="true"><use href="#splice" fill="currentColor"/></svg>
+        <span class="wordmark">Clip<em>Catalyst</em></span>
+      </span>
+      <span class="appicon"><svg aria-hidden="true"><use href="#splice" fill="currentColor"/></svg></span>
+      <span class="tabchip">
+        <svg aria-hidden="true"><use href="#splice" fill="currentColor"/></svg>
+        <span>ClipCatalyst — Studio</span>
+      </span>
+    </div>
+
+    <div class="body">
+      <div class="scores">
+        <span class="score win">16px survival <b>9.0</b></span>
+        <span class="score win">Craft &amp; distinctiveness <b>8.5</b></span>
+        <span class="score">Meaning to a stranger <b>5.5</b></span>
+      </div>
+      <div class="case">
+        <div class="for">
+          <h4>Why it wins</h4>
+          <p>
+            The outer corners are rounded and the cut edges are square, so your
+            eye can put the three pieces back together into one rounded
+            rectangle — the source video. It is built on a 1.5-unit module, which
+            means every edge lands exactly on a pixel boundary at favicon size:
+            measured, 4% of its pixels go grey at 16px, against 22–55% for
+            everything else here. Because the three pieces sit on no shared
+            baseline, it refuses to read as a bar chart — the trap that killed
+            three rival marks.
+          </p>
+        </div>
+        <div>
+          <h4>The honest case against</h4>
+          <p>
+            The story it is sold on — <em>one slab, cut apart</em> — is invisible
+            unless someone tells you. Cold, a stranger reads "three tall shapes,
+            moving", which is still true and still on-message, but it is a
+            weaker claim than the idea on paper. It also leans on "Clip" and
+            says nothing about "Catalyst".
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== THE RUNNER-UP ===================== -->
+  <section class="spec">
+    <div class="spec-head">
+      <div class="titleline">
+        <h2>Turn</h2>
+        <span class="badge plain">The reframe</span>
+      </div>
+      <p class="muted">
+        The same rectangle in both orientations, stepping up to the right — wide
+        goes in, tall comes out.
+      </p>
+    </div>
+
+    <div class="hero-mark">
+      <svg viewBox="0 0 24 24" aria-label="Turn mark" role="img"><use href="#turn" fill="url(#g)"/></svg>
+    </div>
+
+    <div class="strips">
+      <div class="strip on-dark">
+        <p class="strip-label">Flat white · dark ground</p>
+        <div class="sizes">
+          <div class="size"><svg class="s16" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>16</span></div>
+          <div class="size"><svg class="s24" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>24</span></div>
+          <div class="size"><svg class="s32" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>32</span></div>
+          <div class="size"><svg class="s64" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>64</span></div>
+        </div>
+      </div>
+      <div class="strip on-light">
+        <p class="strip-label">Flat ink · light ground</p>
+        <div class="sizes">
+          <div class="size"><svg class="s16" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>16</span></div>
+          <div class="size"><svg class="s24" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>24</span></div>
+          <div class="size"><svg class="s32" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>32</span></div>
+          <div class="size"><svg class="s64" aria-hidden="true"><use href="#turn" fill="currentColor"/></svg><span>64</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="inuse">
+      <span class="lockup">
+        <svg aria-hidden="true"><use href="#turn" fill="currentColor"/></svg>
+        <span class="wordmark">Clip<em>Catalyst</em></span>
+      </span>
+      <span class="appicon"><svg aria-hidden="true"><use href="#turn" fill="currentColor"/></svg></span>
+      <span class="tabchip">
+        <svg aria-hidden="true"><use href="#turn" fill="currentColor"/></svg>
+        <span>ClipCatalyst — Studio</span>
+      </span>
+    </div>
+
+    <div class="body">
+      <div class="scores">
+        <span class="score">16px survival <b>7.0</b></span>
+        <span class="score">Craft &amp; distinctiveness <b>5.0</b></span>
+        <span class="score win">Meaning to a stranger <b>8.0</b></span>
+      </div>
+      <div class="case">
+        <div class="for">
+          <h4>Why it nearly wins</h4>
+          <p>
+            It is the only mark whose meaning survived a cold read. Shown with
+            the name hidden, the judge wrote down "wide block, tall block" — and
+            the geometry is literally exact: 12.8×7.2 and 7.2×12.8, a true 16:9
+            and a true 9:16 of identical area. That is your product stated as
+            geometry, and no competitor in this category says anything about
+            aspect ratio. It is the most defensible territory on offer.
+          </p>
+        </div>
+        <div>
+          <h4>The honest case against</h4>
+          <p>
+            Two rounded rectangles is a very small amount of drawing. It never
+            says video, it has no energy, and at a glance it can read as a
+            layout or grid icon from a system icon set. It states the mechanism
+            beautifully and the personality not at all.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ALTERNATES ===================== -->
+  <section>
+    <h2>The other four worth seeing</h2>
+    <p class="lede small">
+      Each was the strongest survivor of its territory. Large in brand violet,
+      then at true 16 pixels beside it — because that second one is what people
+      will actually look at every day.
+    </p>
+    <div class="alts" style="margin-top:1.5rem">
+
+      <article class="alt">
+        <div class="mini">
+          <svg class="m64" aria-hidden="true"><use href="#arch" fill="currentColor"/></svg>
+          <svg class="m16" aria-hidden="true"><use href="#arch" fill="currentColor"/></svg>
+        </div>
+        <div class="txt">
+          <h3>Splice Arch</h3>
+          <p class="muted small">
+            Splice's symmetric sibling — the best-scoring moment lifted clear of
+            the other two. Centres perfectly in an app icon, and scored 8.0 at
+            16px. Slightly closer to the bar-chart look Splice escapes.
+          </p>
+        </div>
+      </article>
+
+      <article class="alt">
+        <div class="mini">
+          <svg class="m64" aria-hidden="true"><use href="#peak" fill="currentColor"/></svg>
+          <svg class="m16" aria-hidden="true"><use href="#peak" fill="currentColor"/></svg>
+        </div>
+        <div class="txt">
+          <h3>Peak</h3>
+          <p class="muted small">
+            Every moment scored, one of them won — so it grew into a 9:16 clip
+            while the losers stayed as stubs. The centre is a true 9:16
+            rectangle. Read cold as "a phone flanked by two pills", which is
+            closer to the truth than most managed.
+          </p>
+        </div>
+      </article>
+
+      <article class="alt">
+        <div class="mini">
+          <svg class="m64" aria-hidden="true"><use href="#reframe" fill="currentColor"/></svg>
+          <svg class="m16" aria-hidden="true"><use href="#reframe" fill="currentColor"/></svg>
+        </div>
+        <div class="txt">
+          <h3>Reframe</h3>
+          <p class="muted small">
+            Turn's better-argued cousin: the 16:9 source drawn hollow, the 9:16
+            output drawn solid — the frame emptied, the clip filled. A genuinely
+            good second thought, at the cost of a thin stroke that softens as it
+            shrinks.
+          </p>
+        </div>
+      </article>
+
+      <article class="alt">
+        <div class="mini">
+          <svg class="m64" aria-hidden="true"><use href="#hold" fill="currentColor"/></svg>
+          <svg class="m16" aria-hidden="true"><use href="#hold" fill="currentColor"/></svg>
+        </div>
+        <div class="txt">
+          <h3>Hold</h3>
+          <p class="muted small">
+            The one monogram that earned itself: the C is a viewport, and its
+            counter holds an upright 9:16 clip. Technically the most robust mark
+            in the whole set — the only one with no 1-pixel gaps at 16px. But a
+            C in a circle is the most crowded shape in software.
+          </p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ===================== HOW TO DECIDE ===================== -->
+  <section>
+    <h2>How to actually decide</h2>
+    <div class="steps" style="margin-top:1.25rem">
+      <div class="step">
+        <span class="n">01</span>
+        <p class="small">
+          <strong>Look at this page on your phone and squint.</strong> The mark
+          you can still identify while squinting is the one that will work on a
+          browser tab, an app icon, and a TikTok profile picture. That is the
+          test that matters most and it takes five seconds.
+        </p>
+      </div>
+      <div class="step">
+        <span class="n">02</span>
+        <p class="small">
+          <strong>Ask which story you want to own.</strong> Splice says
+          <em>one video becomes many clips</em>. Turn says <em>landscape becomes
+          vertical</em>. Peak says <em>we find the best moment</em>. All three
+          are true about your product; they are not equally easy to draw, and
+          they lead to different marketing.
+        </p>
+      </div>
+      <div class="step">
+        <span class="n">03</span>
+        <p class="small">
+          <strong>Do not pick for the pitch deck.</strong> The mark's real job is
+          being recognised at 16 pixels next to nine other tabs. Anything that
+          only looks good at 256 pixels is a poster, not a logo.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="small">
+      Tell me which one and I will build the full identity around it: the mark
+      in the navbar and footer, a real favicon set, the app icon, an
+      open-graph card for link previews, and the wordmark lockup — replacing the
+      lightning bolt everywhere it currently appears. If none of these land,
+      say what is wrong with the closest one and I will take that territory
+      further rather than start over.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

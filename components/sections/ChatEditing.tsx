@@ -1,4 +1,4 @@
-import { Badge, Card, Container, GradientText, SectionHeading } from "@/components/ui";
+import { Badge, Card, Container, GradientText, Mark, SectionHeading } from "@/components/ui";
 
 const EXCHANGES: {
   command: string;
@@ -45,9 +45,7 @@ function CatalystAvatar() {
       aria-hidden
       className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-spark-500 shadow-[0_0_12px_rgba(139,92,246,0.4)]"
     >
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-        <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" fill="white" />
-      </svg>
+      <Mark className="h-3 w-3 text-white" />
     </span>
   );
 }

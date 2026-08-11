@@ -17,10 +17,30 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
+const TITLE = "ClipCatalyst — Studio-quality AI clips in 90 seconds";
+const DESCRIPTION =
+  "ClipCatalyst turns long-form video into viral-ready vertical clips in under 90 seconds. Virality Engine, chat-based editing, 4K export, one-click publish.";
+
 export const metadata: Metadata = {
-  title: "ClipCatalyst — Studio-quality AI clips in 90 seconds",
-  description:
-    "ClipCatalyst turns long-form video into viral-ready vertical clips in under 90 seconds. Virality Engine, chat-based editing, 4K export, one-click publish.",
+  title: TITLE,
+  description: DESCRIPTION,
+  applicationName: "ClipCatalyst",
+  // ORIGIN ONLY. Next already prefixes the image path with basePath
+  // (/clipcatalyst on Pages), so putting the project path here too yields
+  // .../clipcatalyst/clipcatalyst/opengraph-image.png and every shared link
+  // previews with a broken image.
+  metadataBase: new URL("https://allentackie-ops.github.io"),
+  openGraph: {
+    type: "website",
+    siteName: "ClipCatalyst",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

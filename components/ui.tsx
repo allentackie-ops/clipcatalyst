@@ -201,17 +201,30 @@ export function ScoreRing({
 }
 
 /** Brand wordmark: bolt glyph + name. */
+/**
+ * The ClipCatalyst mark: one wide video cut into three tall clips, sliding
+ * apart. Outer corners are rounded and the cut edges are square, so the three
+ * pieces still read as one rectangle that was divided.
+ *
+ * Drawn on a 1.5-unit module, which puts every edge on a whole pixel at 16px —
+ * the size it spends most of its life at. Fills with `currentColor`, so the
+ * caller owns the colour and there is no gradient id to collide when the mark
+ * appears more than once on a page.
+ */
+export function Mark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M3.75 3 H7.5 V15 H3.75 A2.25 2.25 0 0 1 1.5 12.75 V5.25 A2.25 2.25 0 0 1 3.75 3 Z" />
+      <path d="M9 6 H15 V18 H9 Z" />
+      <path d="M16.5 9 H20.25 A2.25 2.25 0 0 1 22.5 11.25 V18.75 A2.25 2.25 0 0 1 20.25 21 H16.5 Z" />
+    </svg>
+  );
+}
+
 export function Logo({ className = "" }: { className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 ${className}`}>
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-spark-500 shadow-[0_0_16px_rgba(139,92,246,0.5)]">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-            fill="white"
-          />
-        </svg>
-      </span>
+    <span className={`inline-flex items-center gap-2.5 ${className}`}>
+      <Mark className="h-[26px] w-[26px] text-brand-400" />
       <span className="font-display text-lg font-semibold tracking-tight text-white">
         Clip<span className="text-brand-400">Catalyst</span>
       </span>

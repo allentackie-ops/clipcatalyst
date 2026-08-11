@@ -12,10 +12,15 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import stripe
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
+
+# The form parser builds Starlette's UploadFile; FastAPI's is a SUBCLASS used
+# for signature-declared params, so an isinstance check against it silently
+# misses every part of a hand-parsed form (and quietly cleared the logo).
+from starlette.datastructures import UploadFile
 
 from . import auth, billing, brandkit, db
 from .models import (
@@ -43,7 +48,7 @@ from .models import (
     WebhookAckResponse,
 )
 from .plans import PLANS, effective_plan
-from .settings import get_settings
+from .settings import Settings, get_settings
 from .storage import get_storage
 from .worker import process_job, reconcile_stalled
 
@@ -165,7 +170,7 @@ def _signed_in(user: dict) -> AuthResponse:
 # --------------------------------------------------------------------------- #
 
 
-def _brand_logo_file(settings, user: dict) -> Path | None:
+def _brand_logo_file(settings: Settings, user: dict) -> Path | None:
     """The account's stored logo as a real file, or None.
 
     A row naming a file that is no longer on disk reads as "no logo": the kit
@@ -175,7 +180,7 @@ def _brand_logo_file(settings, user: dict) -> Path | None:
     return path if path is not None and path.is_file() else None
 
 
-def _brand_out(settings, user: dict) -> BrandKitOut:
+def _brand_out(settings: Settings, user: dict) -> BrandKitOut:
     """The stored kit as the client sees it — the logo as a URL, not bytes."""
     logo = _brand_logo_file(settings, user)
     return BrandKitOut(
@@ -187,7 +192,7 @@ def _brand_out(settings, user: dict) -> BrandKitOut:
     )
 
 
-def _remove_brand_logos(settings, user_id: str) -> None:
+def _remove_brand_logos(settings: Settings, user_id: str) -> None:
     """Drop every stored logo for an account, whatever extension it carries.
 
     One account owns at most one logo, but a PNG replaced by a WebP would
@@ -206,7 +211,7 @@ def _remove_brand_logos(settings, user_id: str) -> None:
             pass
 
 
-def _store_brand_logo(settings, user_id: str, data: bytes) -> str:
+def _store_brand_logo(settings: Settings, user_id: str, data: bytes) -> str:
     """Write a validated logo and return the name to store on the user row."""
     content_type, error = brandkit.validate_logo_bytes(data)
     if error is not None:
@@ -250,8 +255,13 @@ def _decode_data_url(value: str) -> bytes | None:
 
 
 def _form_flag(value: object, default: bool) -> bool:
-    """An HTML form's idea of a boolean ("true"/"1"/"on"), else the default."""
-    if isinstance(value, str):
+    """An HTML form's idea of a boolean ("true"/"1"/"on"), else the default.
+
+    A field that is absent OR empty takes the default: an empty string is what
+    a form sends when it has nothing to say about a control, and reading that
+    as "off" would hide a creator's logo because their panel omitted a value.
+    """
+    if isinstance(value, str) and value.strip():
         return value.strip().lower() in ("true", "1", "on", "yes")
     return default
 
@@ -282,7 +292,9 @@ async def _read_brand_body(request: Request) -> tuple[bytes | None, str, bool]:
             ),
         )
 
-    if content_type == "multipart/form-data":
+    # Both form encodings go through the same parser: multipart carries the
+    # file itself, urlencoded can still carry a data: URL and the two scalars.
+    if content_type in ("multipart/form-data", "application/x-www-form-urlencoded"):
         form = await request.form()
         try:
             field = form.get("logo")

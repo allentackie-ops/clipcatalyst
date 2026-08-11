@@ -40,6 +40,19 @@ row so `GET /jobs/{id}` can stream honest progress.
   duration, url, width, height}`
 - `GET /v1/files/{job_id}/{name}` — serves rendered clips in local-storage
   mode (S3 mode returns presigned GET urls in `clips[].url` instead).
+- `PUT /v1/me/brand` (session) — the brand kit, as multipart
+  (`logo` file + `caption_color` + `show_logo`) or JSON (`logo` as a base64
+  `data:` URL). Replaces the WHOLE kit. Logo ≤ 2 MB with the content type
+  SNIFFED from the bytes, colour validated with the same rule as the TS,
+  stored at `data_dir/brand/{user_id}.{ext}` — the extension comes from the
+  sniffed type, never from the upload's filename. `403` when the effective
+  plan carries no `brand_kit`. → `{logo_url, caption_color, show_logo}`
+- `DELETE /v1/me/brand` — clears the kit and its file. Not plan-gated: a
+  downgrade must never strand somebody's logo on our disk.
+- `GET /v1/me/brand/logo` — the stored logo (session-only, `nosniff` +
+  `default-src 'none'` because an uploaded SVG is markup).
+- `GET /v1/me` also returns `brand` (the kit, logo as a URL) and
+  `entitlements.brand_kit`.
 - `GET /v1/healthz` → `{ok, version, queue: "redis"|"eager", storage,
   transcriber}`
 
@@ -49,8 +62,16 @@ row so `GET /jobs/{id}` can stream honest progress.
 - `pipeline/types.py` (DONE — frozen): Word/Transcript/AudioFeatures/ClipPlan
   dataclasses; keep field names aligned with the TS types in
   `lib/studio/types.ts`.
+- `brandkit.py`: the cloud half of the shared brand-kit core — a port of the
+  pure section of `lib/studio/brandkit.ts` (`logo_box` geometry,
+  `active_word_color`, `normalize_hex`, the upload limits) plus the
+  server-only parts (`sniff_image_type`, id-derived storage paths).
+  `api/tests/test_brandkit.py` cross-checks `logo_box` against the TypeScript
+  through a node subprocess, like croptrack and diarize.
 - `pipeline/probe.py`: `probe_media(path) -> MediaInfo{duration, width,
-  height, has_audio}` via ffprobe (`settings.ffprobe_bin`).
+  height, has_audio}` via ffprobe (`settings.ffprobe_bin`); plus
+  `probe_image_size(path) -> (w, h) | None`, which never raises — the logo
+  overlay degrades to no overlay rather than failing a render.
 - `pipeline/transcribe.py`: `get_transcriber(settings) -> Transcriber`;
   `Transcriber.transcribe(path, on_progress) -> Transcript`.
   Implementations: `FasterWhisperTranscriber` (imported lazily so the API
@@ -77,6 +98,11 @@ row so `GET /jobs/{id}` can stream honest progress.
   the generated .ass (escape the path), x264 `-preset veryfast -crf 21`,
   aac 128k, `+faststart`. Parse `-progress pipe:1` for on_progress. Raise
   RenderError with the tail of stderr on failure.
+  With a brand logo (`opts.logo_path`, only on unwatermarked renders) the
+  logo becomes a second `-i` and the same chain moves into `-filter_complex`:
+  `[1:v]scale=W:H[logo];[0:v]…[base];[base][logo]overlay=X:Y[v]` with
+  `-map [v] -map 0:a?`, W/H/X/Y from `brandkit.logo_box`. Unbranded renders
+  build the identical argv they always did.
 - `db.py`: SQLite (WAL) at `settings.db_path`; plain sqlite3, tiny DAO:
   `create_job, get_job, update_job(**fields), set_clips(job_id, clips)`.
   Thread/process safe via short-lived connections.

@@ -118,6 +118,33 @@ class EntitlementsOut(BaseModel):
     max_height: int
     watermark_required: bool
     clips_per_month: int | None
+    # Whether cloud renders may carry the account's own logo and caption
+    # colour. Its own promise, never inferred from watermark_required — the
+    # panel shows the upsell off THIS field.
+    brand_kit: bool = False
+
+
+class BrandKitRequest(BaseModel):
+    """The JSON shape of ``PUT /v1/me/brand`` (multipart is the other form).
+
+    A PUT replaces the whole kit, so an omitted field means "not part of the
+    kit any more", not "leave it alone" — the panel holds the complete kit
+    locally and syncs it whole. ``logo`` is a ``data:`` URL (what the browser
+    already stores); its bytes are decoded, size-checked and SNIFFED
+    server-side, and the declared media type in the URL is ignored.
+    """
+
+    logo: str | None = None
+    caption_color: str | None = None
+    show_logo: bool = True
+
+
+class BrandKitOut(BaseModel):
+    """A stored kit as the client sees it — the logo as a URL, never bytes."""
+
+    logo_url: str | None = None
+    caption_color: str | None = None
+    show_logo: bool = True
 
 
 class MeResponse(BaseModel):
@@ -128,6 +155,7 @@ class MeResponse(BaseModel):
     plan_status: str
     quota: QuotaOut
     entitlements: EntitlementsOut
+    brand: BrandKitOut = Field(default_factory=BrandKitOut)
 
 
 class CheckoutRequest(BaseModel):

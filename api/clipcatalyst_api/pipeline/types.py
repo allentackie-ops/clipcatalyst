@@ -80,6 +80,14 @@ class RenderOptions:
     watermark: bool = True
     crf: int = 21
     preset: str = "veryfast"
+    # Brand kit (BRANDKIT.md). Both are resolved from the owner's LIVE plan in
+    # worker.py, never from the job row or the client. `logo_path` is a local
+    # file overlaid bottom-right in place of our mark — our mark wins when
+    # `watermark` is set, so the two are never drawn together. `caption_color`
+    # is "#rrggbb" and replaces the default violet for unassigned words in
+    # clips with fewer than two speakers; diarized colours are untouched.
+    logo_path: str | None = None
+    caption_color: str | None = None
 
 
 @dataclass

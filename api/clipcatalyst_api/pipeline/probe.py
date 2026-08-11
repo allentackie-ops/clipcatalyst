@@ -41,6 +41,68 @@ def probe_media(path: str | Path, settings: Settings) -> MediaInfo:
     return info
 
 
+def probe_image_size(path: str | Path, settings: Settings) -> tuple[int, int] | None:
+    """Pixel size of a still image, or None when it cannot be read.
+
+    Deliberately total where ``probe_media`` raises: its only caller is the
+    brand-kit logo overlay, which must degrade to no overlay rather than fail
+    somebody's render (BRANDKIT.md — "a brand kit must never fail a render").
+    A still has no duration, so it can never go through ``probe_media``, whose
+    contract is a playable clip.
+
+    ffprobe first; when the box ships only the static ffmpeg binary (no
+    ffprobe on PATH), the same stderr banner ``_probe_with_ffmpeg`` parses
+    carries the dimensions. An unreadable file, an unsupported codec (an SVG
+    on a build with no SVG decoder), or a missing binary all answer None.
+    """
+    path = Path(path)
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
+    except OSError:
+        return None
+
+    cmd = [
+        settings.ffprobe_bin,
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-select_streams",
+        "v:0",
+        "-show_streams",
+        str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if proc.returncode == 0:
+            streams = json.loads(proc.stdout or "{}").get("streams", [])
+            if streams:
+                width = int(streams[0].get("width") or 0)
+                height = int(streams[0].get("height") or 0)
+                if width > 0 and height > 0:
+                    return width, height
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # ffprobe missing/unusable — the ffmpeg banner below still knows
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+    try:
+        proc = subprocess.run(
+            [settings.ffmpeg_bin, "-hide_banner", "-i", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = _VIDEO_RE.search(proc.stderr or "")
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
 def _probe_with_ffprobe(path: Path, settings: Settings) -> MediaInfo | None:
     """Run ffprobe; None when the binary itself is unavailable."""
     cmd = [

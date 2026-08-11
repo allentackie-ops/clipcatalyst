@@ -574,6 +574,7 @@ def test_checkout_completed_maps_each_price_to_its_plan(
         "max_height": max_height,
         "watermark_required": False,
         "clips_per_month": limit,
+        "brand_kit": True,  # every paid plan carries one (BRANDKIT.md)
     }
 
 
@@ -712,6 +713,7 @@ def test_subscription_deleted_returns_the_account_to_free(
         "max_height": 1280,
         "watermark_required": True,
         "clips_per_month": 3,
+        "brand_kit": False,  # cancelling takes the kit back with the plan
     }
 
 

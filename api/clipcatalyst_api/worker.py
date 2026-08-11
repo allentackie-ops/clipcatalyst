@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from celery.exceptions import SoftTimeLimitExceeded, Terminated
 
 from . import db
+from .brandkit import logo_abs_path, normalize_hex
 from .pipeline.croptrack import CropTrack, CropTrackOptions, build_crop_track
 from .pipeline.diarize import assign_speakers, build_speech_segments
 from .pipeline.facetrack import detect_faces
@@ -386,7 +387,13 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
     )
 
     # --- render (sequential, per-clip failure isolation) -----------------
-    opts = RenderOptions(height=_height_for(job), watermark=_watermark_for(job))
+    logo_path, caption_color = _brand_kit_for(job, settings)
+    opts = RenderOptions(
+        height=_height_for(job),
+        watermark=_watermark_for(job),
+        logo_path=logo_path,
+        caption_color=caption_color,
+    )
     clips: list[dict] = []
     failed_count = 0
 
@@ -503,20 +510,28 @@ def _diarize_transcript(
         return transcript, 1
 
 
-def _owner_entitlements(job: dict) -> Plan | None:
-    """The job owner's EFFECTIVE plan entitlements, as of render time.
+def _owner_of(job: dict) -> dict | None:
+    """The account row behind a job, as it stands RIGHT NOW.
 
-    None for the cases with no live account behind the job: anonymous
-    founder/dev jobs (user_id ""), and owned jobs whose user row is gone.
-    Reading the plan here rather than trusting the job row is the point —
-    an upgrade that lands between create and start is honoured, and a plan
-    that lapsed in that window cannot keep spending the entitlements it had
-    when the row was written. Nothing the client sent is read.
+    None for the cases with no live account: anonymous founder/dev jobs
+    (user_id ""), and owned jobs whose user row is gone.
     """
     owner_id = str(job.get("user_id") or "")
     if not owner_id:
         return None
-    user = db.get_user_by_id(owner_id)
+    return db.get_user_by_id(owner_id)
+
+
+def _owner_entitlements(job: dict) -> Plan | None:
+    """The job owner's EFFECTIVE plan entitlements, as of render time.
+
+    None whenever ``_owner_of`` finds no account. Reading the plan here rather
+    than trusting the job row is the point — an upgrade that lands between
+    create and start is honoured, and a plan that lapsed in that window cannot
+    keep spending the entitlements it had when the row was written. Nothing the
+    client sent is read.
+    """
+    user = _owner_of(job)
     if user is None:
         return None
     return PLANS[effective_plan(user)]
@@ -549,6 +564,42 @@ def _height_for(job: dict) -> int:
     if entitlements is None:
         return height
     return min(height, entitlements.max_height)
+
+
+def _brand_kit_for(job: dict, settings: Settings) -> tuple[str | None, str | None]:
+    """This job's brand kit at render time: ``(logo path, caption colour)``.
+
+    Resolved from the owner's LIVE plan, in the same breath as _watermark_for
+    and _height_for and for the same reason: a downgrade must take the brand
+    kit away on the NEXT RENDER, not at next login. A job row cannot carry a
+    kit it was created with.
+
+    Three server-side facts decide it, in the order BRANDKIT.md sets out:
+
+    * no ``brand_kit`` on the effective plan (free, lapsed, anonymous) → no
+      kit at all. It is its own entitlement, never read off the watermark.
+    * ``watermark_required`` → OUR mark is drawn, so neither the logo nor the
+      colour applies; a free account's stored kit is the upsell, not a render.
+    * otherwise the colour applies whenever there is one, and the logo also
+      needs ``show_logo`` and a file that is really on disk — a row pointing
+      at a logo that has been removed renders a clean corner, not an error.
+
+    A colour that no longer parses degrades to None (today's violet), and the
+    stored path is resolved through ``logo_abs_path``, which refuses anything
+    outside the brand directory.
+    """
+    owner = _owner_of(job)
+    if owner is None:
+        return None, None
+    entitlements = PLANS[effective_plan(owner)]
+    if not entitlements.brand_kit or entitlements.watermark_required:
+        return None, None
+    logo: str | None = None
+    if int(owner.get("brand_show_logo") or 0):
+        path = logo_abs_path(settings, str(owner.get("brand_logo_path") or ""))
+        if path is not None and path.is_file():
+            logo = str(path)
+    return logo, normalize_hex(str(owner.get("brand_caption_color") or ""))
 
 
 def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> dict:

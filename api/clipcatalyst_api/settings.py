@@ -83,8 +83,19 @@ class Settings:
     def tmp_dir(self) -> Path:
         return self.data_dir / "tmp"
 
+    @property
+    def brand_dir(self) -> Path:
+        """Uploaded brand logos, one file per account (see brandkit.py)."""
+        return self.data_dir / "brand"
+
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.uploads_dir, self.clips_dir, self.tmp_dir):
+        for d in (
+            self.data_dir,
+            self.uploads_dir,
+            self.clips_dir,
+            self.tmp_dir,
+            self.brand_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
     def duplicate_price_ids(self) -> dict[str, list[str]]:

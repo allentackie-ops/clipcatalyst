@@ -9,7 +9,10 @@ active color follows each word's own start time (ASS colors are &HAABBGGRR,
 hence #A78BFA -> &H00FA8BA7&).
 
 Diarized words (word.speaker set) highlight in that speaker's SPEAKER_COLORS
-entry instead; words without a speaker keep the violet above, byte for byte.
+entry instead; words without a speaker keep the violet above, byte for byte —
+unless the clip's owner has a brand colour, which replaces that violet in
+clips with fewer than two speakers (brandkit.active_word_color decides, and
+the browser renderer calls the same rule through the TypeScript twin).
 
 Fontname is "Inter"; libass/fontconfig substitutes the default sans-serif
 automatically when Inter is not installed.
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from ..brandkit import active_word_color
 from .diarize import SPEAKER_COLORS
 from .types import ClipPlan, Word
 
@@ -35,8 +39,10 @@ def _hex_to_ass_color(hex_color: str) -> str:
     return rf"\1c&H{b}{g}{r}&"
 
 
-#: Active-word highlight per diarized speaker; index = speaker % len(palette).
-#: Words WITHOUT a speaker keep ACTIVE_COLOR (today's violet) exactly.
+#: The diarization palette in ASS channel order; index = speaker % len(palette).
+#: What a word actually gets is decided by ``_active_color`` (a brand colour can
+#: replace the violet below when the clip has fewer than two speakers), but the
+#: mapping from a palette entry to an override tag is exactly this.
 SPEAKER_ACTIVE_COLORS = tuple(_hex_to_ass_color(c) for c in SPEAKER_COLORS)
 
 
@@ -87,20 +93,40 @@ def group_words(words: list[Word]) -> list[list[Word]]:
     return groups
 
 
-def _active_color(word: Word) -> str:
-    """The highlight color for one word: its speaker's palette entry, or the
-    exact legacy violet when no speaker was diarized (byte-identical output)."""
+def speaker_count(words: list[Word]) -> int:
+    """Distinct diarized speakers in a clip's words (unassigned ones aside).
+
+    The same count the browser derives from the clip's words, and the same one
+    ``worker._clip_out`` reports — it is what decides whether diarization is
+    colouring this clip at all, and therefore whether a brand colour applies.
+    """
+    return len({w.speaker for w in words if getattr(w, "speaker", None) is not None})
+
+
+def _active_color(word: Word, speakers: int, caption_color: str | None) -> str:
+    """The highlight color for one word, in ASS's blue-green-red channels.
+
+    The decision itself is ``brandkit.active_word_color`` — the one place both
+    engines agree: a diarized word in a 2+ speaker clip keeps its palette
+    entry, everything else takes the brand colour or the legacy violet. That
+    violet round-trips to exactly ``ACTIVE_COLOR``, so an unbranded clip is
+    still byte-identical to the pre-brand-kit output.
+    """
     speaker = getattr(word, "speaker", None)
-    if speaker is None:
-        return ACTIVE_COLOR
-    return SPEAKER_ACTIVE_COLORS[int(speaker) % len(SPEAKER_ACTIVE_COLORS)]
+    return _hex_to_ass_color(active_word_color(speaker, speakers, caption_color))
 
 
-def _group_text(group: list[Word], group_start: float, group_end: float) -> str:
+def _group_text(
+    group: list[Word],
+    group_start: float,
+    group_end: float,
+    speakers: int,
+    caption_color: str | None,
+) -> str:
     """One group's event text: each word carries its highlight transforms."""
     parts: list[str] = []
     for i, w in enumerate(group):
-        active = _active_color(w)
+        active = _active_color(w, speakers, caption_color)
         on_ms = max(0, round((w.start - group_start) * 1000))
         tags = active if on_ms == 0 else (
             INACTIVE_COLOR + rf"\t({on_ms},{on_ms},{active})"
@@ -112,8 +138,17 @@ def _group_text(group: list[Word], group_start: float, group_end: float) -> str:
     return " ".join(parts)
 
 
-def build_ass(plan: ClipPlan, height: int, watermark: bool) -> str:
-    """Build a complete ASS document for one clip (words already re-based)."""
+def build_ass(
+    plan: ClipPlan, height: int, watermark: bool, caption_color: str | None = None
+) -> str:
+    """Build a complete ASS document for one clip (words already re-based).
+
+    ``watermark`` is our mark, and it is the ONLY thing that writes the
+    Watermark dialogue line — a clip carrying the owner's own logo (drawn by
+    render.py, over the video rather than into the subtitles) must not also
+    carry ours. ``caption_color`` is the owner's brand colour, applied per the
+    rule in ``_active_color``; None keeps today's violet.
+    """
     width = round(height * 9 / 16 / 2) * 2  # nearest even 9:16 width
     font_size = max(1, round(height * 0.042))
     wm_size = max(1, round(height * 0.021))
@@ -151,12 +186,13 @@ def build_ass(plan: ClipPlan, height: int, watermark: bool) -> str:
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Text",
     ]
 
+    speakers = speaker_count(plan.words)
     for group in group_words(plan.words):
         start = group[0].start
         end = max(group[-1].end, start + 0.01)
         lines.append(
             f"Dialogue: 0,{_timestamp(start)},{_timestamp(end)},Caption,,0,0,0,"
-            f"{_group_text(group, start, end)}"
+            f"{_group_text(group, start, end, speakers, caption_color)}"
         )
 
     if watermark:

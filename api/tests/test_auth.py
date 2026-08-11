@@ -221,7 +221,17 @@ def test_register_login_logout_me_round_trip(sandbox: SimpleNamespace) -> None:
         "plan": "free",
         "plan_status": "",
         "quota": {"limit": 3, "used": 0, "month": month},
-        "entitlements": {"max_height": 1280, "watermark_required": True, "clips_per_month": 3},
+        "entitlements": {
+            "max_height": 1280,
+            "watermark_required": True,
+            "clips_per_month": 3,
+            # Free carries no brand kit — its own promise, not the inverse of
+            # the watermark (BRANDKIT.md §3a; test_brandkit.py owns the rest).
+            "brand_kit": False,
+        },
+        # A fresh account has never opened the panel: no logo, no colour, and
+        # showLogo on — the EMPTY_KIT the browser starts from.
+        "brand": {"logo_url": None, "caption_color": None, "show_logo": True},
     }
 
     # A fresh login issues a distinct token; both sessions are live at once.
@@ -524,6 +534,7 @@ def test_me_reports_usage_and_effective_plan(sandbox: SimpleNamespace) -> None:
         "max_height": 1920,
         "watermark_required": False,
         "clips_per_month": 30,
+        "brand_kit": True,  # promised from Starter up (BRANDKIT.md)
     }
 
     # Canceled keeps the stored plan name but entitles as free.

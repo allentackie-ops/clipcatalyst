@@ -1,7 +1,11 @@
 // Canvas clip renderer: plays the source video hidden, cover-crops it onto a
-// 9:16 canvas, overlays animated word captions + watermark + progress bar, and
-// records canvas.captureStream + silently-captured audio with MediaRecorder.
+// 9:16 canvas, overlays animated word captions + corner mark + progress bar,
+// and records canvas.captureStream + silently-captured audio with
+// MediaRecorder. The corner mark is ours, the creator's brand logo, or
+// nothing — see the brand-kit block inside renderClip for the rule.
 
+import { activeWordColor as sharedActiveWordColor, isEmptyKit, logoBox } from "./brandkit";
+import type { BrandKit, LogoBox } from "./brandkit";
 import { cropCenterAt } from "./croptrack";
 import type { CropTrack } from "./croptrack";
 import { SPEAKER_COLORS } from "./diarize";
@@ -42,6 +46,10 @@ export type RenderClipOptions = RenderOptions & {
   track?: CropTrack;
   /** Edits to bake in. Absent → exactly today's behaviour, byte-identical. */
   edits?: RenderEdits;
+  /** The creator's logo + caption colour. Absent → exactly today's
+   *  behaviour, byte-identical. `watermark` still wins over the logo — the
+   *  plan gate is applied inside, not by the caller. */
+  brandKit?: BrandKit;
 };
 
 const MIME_PREFERENCES = [
@@ -58,6 +66,12 @@ const ACTIVE_WORD_COLOR = "#a78bfa";
  * Highlight color for the active word: the speaker's palette color when the
  * word carries a diarized speaker, else exactly the color used before
  * diarization existed (== SPEAKER_COLORS[0], so speaker 0 is unchanged too).
+ *
+ * This is the UNBRANDED rule and it stays exactly as it was: a render with no
+ * brand kit calls this function and nothing else. A render WITH one goes
+ * through brandkit.ts's `activeWordColor` instead — the one place both engines
+ * agree on the diarization-wins rule. `wordColor` inside renderClip picks
+ * between the two once, before the draw loop.
  */
 function activeWordColor(word: CaptionWord): string {
   return word.speaker === undefined
@@ -67,6 +81,9 @@ function activeWordColor(word: CaptionWord): string {
 const CAPTION_MAX_WORDS = 4;
 const CAPTION_MAX_CHARS = 18;
 const PROGRESS_BAR_PX = 4;
+/** Corner logo opacity — the creator's mark sits back in the frame the same
+ *  way our text mark does, rather than competing with the caption. */
+const LOGO_ALPHA = 0.9;
 
 const METADATA_TIMEOUT_MS = 15_000;
 const SEEK_TIMEOUT_MS = 8_000;
@@ -74,6 +91,9 @@ const CANPLAY_TIMEOUT_MS = 8_000;
 const STOP_TIMEOUT_MS = 10_000;
 const AUDIO_RESUME_TIMEOUT_MS = 1_500;
 const FONTS_READY_TIMEOUT_MS = 2_000;
+/** Budget for decoding the brand logo before the first recorded frame. A logo
+ *  that misses it is dropped and the render carries on without it. */
+const LOGO_DECODE_TIMEOUT_MS = 3_000;
 const BACKGROUND_TICK_MS = 250;
 /** Seek across a cut — shorter than SEEK_TIMEOUT_MS; on timeout we carry on. */
 const SKIP_SEEK_TIMEOUT_MS = 2_000;
@@ -87,6 +107,9 @@ type CaptionWord = { text: string; start: number; end: number; speaker?: number 
 type CaptionGroup = { words: CaptionWord[]; start: number; end: number };
 type LayoutWord = CaptionWord & { width: number };
 type LayoutLine = { words: LayoutWord[]; width: number };
+/** A decoded brand logo and the pixel box it is drawn into — both resolved
+ *  once, before recording, so the draw loop only ever blits. */
+type CornerLogo = { image: HTMLImageElement; box: LogoBox };
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -127,6 +150,20 @@ function buildCaptionGroups(words: TranscriptWord[]): CaptionGroup[] {
   }
   flush();
   return groups;
+}
+
+/**
+ * How many distinct speakers diarization found in this clip's words — the
+ * input to "diarization wins over the brand colour" (BRANDKIT.md). Unlabeled
+ * words are not a speaker. Counted once per render: it cannot change while
+ * the clip plays, and the draw loop must not be doing set arithmetic.
+ */
+function countSpeakers(words: TranscriptWord[]): number {
+  const seen = new Set<number>();
+  for (const w of words) {
+    if (typeof w.speaker === "number" && Number.isFinite(w.speaker)) seen.add(w.speaker);
+  }
+  return seen.size;
 }
 
 /** Wrap a group's words into measured lines no wider than maxWidth. */
@@ -210,6 +247,59 @@ function pickMimeType(): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Decode a logo data URL into an image the canvas can blit, or null.
+ *
+ * Never rejects and never outlives LOGO_DECODE_TIMEOUT_MS: a truncated or
+ * malformed data URL can leave `decode()` pending indefinitely rather than
+ * rejecting, and a brand kit must never be the reason a render stalls, let
+ * alone fails. Every failure — bad bytes, a browser without `decode()` whose
+ * load errors instead, a slow SVG rasterization — answers null, and the
+ * caller falls through to the no-logo corner in silence. Mid-render is not
+ * the moment to tell a creator their logo is broken.
+ *
+ * `data:` only, checked here rather than assumed: a remote logo would decode
+ * fine and then taint the canvas, which kills captureStream and takes the
+ * whole render down — the one way a brand kit could still cost someone their
+ * clip. brandkit.ts's `coerceKit` already drops non-data URLs on the way in
+ * and out of storage; this makes the invariant true by construction for any
+ * kit that reaches the renderer by another route.
+ */
+function decodeLogo(dataUrl: string): Promise<HTMLImageElement | null> {
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    let img: HTMLImageElement;
+    try {
+      img = new Image();
+    } catch {
+      resolve(null); // no Image constructor (non-DOM host) — drop the logo
+      return;
+    }
+    let settled = false;
+    const done = (value: HTMLImageElement | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), LOGO_DECODE_TIMEOUT_MS);
+    // Older browsers have no decode(); their load events say the same thing.
+    if (typeof img.decode !== "function") {
+      img.onload = () => done(img);
+      img.onerror = () => done(null);
+      img.src = dataUrl;
+      return;
+    }
+    img.src = dataUrl;
+    img.decode().then(
+      () => done(img),
+      () => done(null)
+    );
+  });
 }
 
 export async function renderClip(
@@ -485,6 +575,63 @@ export async function renderClip(
       return 1;
     };
 
+    // --- Brand kit: the creator's logo and caption colour. No `brandKit` →
+    // every branch below collapses to exactly today's behaviour. ------------
+    //
+    // The plan gate lives HERE rather than in brandkit.ts, which knows nothing
+    // about plans: `options.watermark` IS the plan's `watermark_required`, and
+    // a clip that carries our mark also keeps the default violet. A free
+    // creator's kit is stored and previewed but never rendered — that is the
+    // upsell, and the same gate covers both assets (BRANDKIT.md).
+    //
+    // A kit with nothing in it resolves to null too. Once the panel ships and
+    // threads a kit through every render, "no kit configured" is the common
+    // case, and it must take the pre-brand-kit path itself rather than a
+    // second path that merely agrees with it.
+    const kit =
+      options.brandKit && !options.watermark && !isEmptyKit(options.brandKit)
+        ? options.brandKit
+        : null;
+    /** Distinct diarized speakers in the clip — 2+ means diarization keeps the
+     *  active word, whatever the brand colour is. Counted once, never in the
+     *  draw loop, and not at all when there is no kit to apply. */
+    const speakerCount = kit ? countSpeakers(plan.words) : 0;
+    /**
+     * The active-word colour function, resolved ONCE. Without a kit this is
+     * the module's own `activeWordColor` — the identical function the renderer
+     * has always called, reached by the identical call in drawCaptions — so an
+     * unbranded caption cannot come out a different colour than it did before
+     * brand kits existed.
+     */
+    const wordColor: (word: CaptionWord) => string = kit
+      ? (word) => sharedActiveWordColor(word.speaker, speakerCount, kit)
+      : activeWordColor;
+    // Decode the logo ONCE, before recording starts, so the draw loop blits an
+    // already-decoded image 30 times a second instead of decoding one. Both
+    // the image and its box are fixed for the whole render: the output size
+    // never changes mid-clip. A logo that fails to decode or misses the
+    // timeout leaves this null and the corner rule falls through to "nothing",
+    // exactly as if the kit had no logo at all.
+    let logo: CornerLogo | null = null;
+    if (kit && kit.showLogo && kit.logo) {
+      const image = await decodeLogo(kit.logo.dataUrl);
+      if (image) {
+        logo = {
+          image,
+          box: logoBox(
+            {
+              // The decoded intrinsic size wins; the size stored with the kit
+              // is the fallback for an SVG with no intrinsic dimensions, which
+              // reports 0 and which logoBox would otherwise read as square.
+              width: image.naturalWidth || kit.logo.width,
+              height: image.naturalHeight || kit.logo.height,
+            },
+            { width, height }
+          ),
+        };
+      }
+    }
+
     const drawVideoFrame = (t: number) => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -565,7 +712,7 @@ export async function renderClip(
         let x = (width - line.width) / 2;
         const y = stripY + padY + lineHeight * (li + 0.5);
         for (const word of line.words) {
-          ctx.fillStyle = flatIdx === activeIdx ? activeWordColor(word) : "#ffffff";
+          ctx.fillStyle = flatIdx === activeIdx ? wordColor(word) : "#ffffff";
           ctx.fillText(word.text, x, y);
           x += word.width + spaceWidth;
           flatIdx++;
@@ -576,6 +723,11 @@ export async function renderClip(
     const drawOverlays = (t: number) => {
       if (captionsOn) drawCaptions(t);
 
+      // The corner, in precedence order (BRANDKIT.md): our mark when the plan
+      // requires it, else the creator's logo when they have one, else a clean
+      // corner. `kit` is already null when `options.watermark` is set, so the
+      // logo branch is unreachable there twice over — deliberately, because
+      // this rule is the one a reviewer must be able to read off the page.
       if (options.watermark) {
         const margin = Math.round(height * 0.02);
         ctx.font = watermarkFont;
@@ -583,6 +735,10 @@ export async function renderClip(
         ctx.textAlign = "right";
         ctx.textBaseline = "bottom";
         ctx.fillText("⚡ ClipCatalyst", width - margin, height - margin);
+      } else if (logo) {
+        ctx.globalAlpha = LOGO_ALPHA;
+        ctx.drawImage(logo.image, logo.box.x, logo.box.y, logo.box.width, logo.box.height);
+        ctx.globalAlpha = 1;
       }
 
       ctx.fillStyle = BRAND_VIOLET;

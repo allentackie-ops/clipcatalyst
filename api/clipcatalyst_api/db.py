@@ -67,17 +67,27 @@ _USER_COLUMNS = (
     "plan",
     "plan_status",
     "current_period_end",
+    "brand_logo_path",
+    "brand_caption_color",
+    "brand_show_logo",
 )
 
 # Plan fields change ONLY through billing (verified webhooks) or the founder;
 # password_hash changes through the auth flows. Email is deliberately not
 # updatable — it is the account's identity.
+#
+# The brand_* fields are the one group a user writes directly (PUT/DELETE
+# /v1/me/brand). They carry no entitlement: what the plan allows is re-read at
+# render time from the plan itself, so a stored kit can never grant anything.
 _USER_UPDATABLE = {
     "password_hash",
     "stripe_customer_id",
     "plan",
     "plan_status",
     "current_period_end",
+    "brand_logo_path",
+    "brand_caption_color",
+    "brand_show_logo",
 }
 
 # The non-terminal statuses a job passes through once it has been started: the
@@ -111,14 +121,17 @@ CREATE TABLE IF NOT EXISTS jobs (
 """,
     """
 CREATE TABLE IF NOT EXISTS users (
-    id                 TEXT PRIMARY KEY,
-    email              TEXT NOT NULL UNIQUE,
-    password_hash      TEXT NOT NULL,
-    created_at         TEXT NOT NULL,
-    stripe_customer_id TEXT NOT NULL DEFAULT '',
-    plan               TEXT NOT NULL DEFAULT 'free',
-    plan_status        TEXT NOT NULL DEFAULT '',
-    current_period_end TEXT NOT NULL DEFAULT ''
+    id                  TEXT PRIMARY KEY,
+    email               TEXT NOT NULL UNIQUE,
+    password_hash       TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    stripe_customer_id  TEXT NOT NULL DEFAULT '',
+    plan                TEXT NOT NULL DEFAULT 'free',
+    plan_status         TEXT NOT NULL DEFAULT '',
+    current_period_end  TEXT NOT NULL DEFAULT '',
+    brand_logo_path     TEXT NOT NULL DEFAULT '',
+    brand_caption_color TEXT NOT NULL DEFAULT '',
+    brand_show_logo     INTEGER NOT NULL DEFAULT 1
 )
 """,
     """
@@ -177,6 +190,24 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
     if "usage_month" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN usage_month TEXT NOT NULL DEFAULT ''")
+    # The brand kit arrived after accounts shipped; upgrade those DBs in place
+    # too. Defaults describe an account that has never opened the panel: no
+    # logo, no colour, and showLogo on — the same EMPTY_KIT the browser starts
+    # from, so a row that predates the feature reads as "unbranded" rather than
+    # as "logo deliberately hidden".
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "brand_logo_path" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN brand_logo_path TEXT NOT NULL DEFAULT ''"
+        )
+    if "brand_caption_color" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN brand_caption_color TEXT NOT NULL DEFAULT ''"
+        )
+    if "brand_show_logo" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN brand_show_logo INTEGER NOT NULL DEFAULT 1"
+        )
 
 
 def init_db() -> None:

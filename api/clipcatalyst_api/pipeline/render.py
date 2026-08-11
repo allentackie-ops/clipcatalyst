@@ -11,19 +11,30 @@ The crop window is the same 9:16 slice it always was; the only new thing is
 that ffmpeg re-evaluates every frame — a piecewise-linear replay of
 ``crop_center_at`` inside the filtergraph, which is what lets a single encode
 pan without us decoding frames ourselves.
+
+A brand kit adds one more thing: the owner's logo as a SECOND input, overlaid
+after the scale so its size and margin are in output pixels rather than source
+ones (see ``build_logo_graph``). Everything about it degrades: a logo that
+cannot be probed is simply not drawn, and a render that carries our watermark
+never draws theirs.
 """
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Callable, Sequence
 
+from ..brandkit import LogoBox, logo_box
 from ..settings import Settings
 from .captions import build_ass
 from .croptrack import CropKeyframe, CropTrack
+from .probe import probe_image_size
 from .types import ClipPlan, RenderedClip, RenderError, RenderOptions
+
+logger = logging.getLogger(__name__)
 
 _STDERR_TAIL_LINES = 15
 
@@ -99,6 +110,52 @@ def build_crop_filter(track: CropTrack | None) -> str:
     return f"crop={_CROP_W}:ih:{escape_filter_expr(x)}:0"
 
 
+def build_logo_graph(video_chain: str, box: LogoBox) -> str:
+    """The -filter_complex that draws the brand logo over a rendered clip.
+
+        [1:v]scale=W:H[logo];[0:v]<crop,scale,subtitles>[base];[base][logo]overlay=X:Y[v]
+
+    The overlay comes AFTER the scale on purpose: the box is computed in OUTPUT
+    pixels (``logo_box``), so the mark is the same visual size and sits the same
+    distance from the corner at 960, 1920 or 3840 — an overlay before the scale
+    would be resized along with the frame and land somewhere else.
+
+    The logo path itself never appears here; it is a labelled INPUT (``-i``),
+    which is argv rather than filtergraph syntax, so no amount of punctuation in
+    a data dir can split this graph the way an unescaped ``subtitles=`` path
+    could. That is the same protection ``escape_subtitles_path`` gives the .ass
+    path, obtained structurally instead of by quoting — and escaping an argv
+    path would in fact break it (ffmpeg would look for a file whose name really
+    did contain the backslashes).
+    """
+    return (
+        f"[1:v]scale={box.width}:{box.height}[logo];"
+        f"[0:v]{video_chain}[base];"
+        f"[base][logo]overlay={box.x}:{box.y}[v]"
+    )
+
+
+def _logo_box_for(
+    logo_path: str, width: int, height: int, settings: Settings
+) -> LogoBox | None:
+    """Where this logo goes in a width x height frame, or None to skip it.
+
+    The probe is the gate: a file that is missing, corrupt, or in a format this
+    ffmpeg build cannot decode (an SVG on a build without an SVG decoder) has no
+    natural size, and a render must never fail over the corner decoration. It
+    also gives us the aspect ratio ``logo_box`` needs, which is the same number
+    the browser reads off the decoded <img>.
+    """
+    try:
+        natural = probe_image_size(logo_path, settings)
+    except Exception:  # noqa: BLE001 - a decoration must never fail a render
+        natural = None
+    if natural is None:
+        logger.warning("brand logo %s could not be read; rendering without it", logo_path)
+        return None
+    return logo_box(natural[0], natural[1], width, height)
+
+
 def render_clip(
     src_path: str | Path,
     plan: ClipPlan,
@@ -116,6 +173,13 @@ def render_clip(
     settings.ensure_dirs()
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # Brand kit precedence (BRANDKIT.md): a plan that requires OUR mark never
+    # draws theirs, so the logo is only considered on an unwatermarked render.
+    # Both halves are already server-side facts by the time they arrive here —
+    # worker.py resolves them from the owner's live plan.
+    logo_path = opts.logo_path if (opts.logo_path and not opts.watermark) else None
+    box = _logo_box_for(logo_path, width, height, settings) if logo_path else None
+
     ass_file = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -127,13 +191,30 @@ def render_clip(
     stderr_file = tempfile.TemporaryFile(dir=settings.tmp_dir)
     try:
         with ass_file:
-            ass_file.write(build_ass(plan, height, opts.watermark))
+            ass_file.write(build_ass(plan, height, opts.watermark, opts.caption_color))
 
         vf = (
             f"{build_crop_filter(track)},"
             f"scale={width}:{height},"
             f"subtitles={escape_subtitles_path(ass_file.name)}"
         )
+        # No logo = the command this renderer has always built, argument for
+        # argument. A branded render adds the second input, moves the same
+        # chain into -filter_complex, and maps the graph's video plus the
+        # source's audio (`?`: a silent source still renders).
+        if box is None:
+            input_args = ["-i", str(src_path)]
+            filter_args = ["-vf", vf]
+        else:
+            input_args = ["-i", str(src_path), "-i", str(logo_path)]
+            filter_args = [
+                "-filter_complex",
+                build_logo_graph(vf, box),
+                "-map",
+                "[v]",
+                "-map",
+                "0:a?",
+            ]
         cmd = [
             settings.ffmpeg_bin,
             "-hide_banner",
@@ -143,10 +224,8 @@ def render_clip(
             f"{plan.start:.3f}",
             "-to",
             f"{plan.end:.3f}",
-            "-i",
-            str(src_path),
-            "-vf",
-            vf,
+            *input_args,
+            *filter_args,
             "-c:v",
             "libx264",
             "-preset",

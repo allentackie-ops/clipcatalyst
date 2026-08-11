@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AsyncIterator
 
 import stripe
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 
-from . import auth, billing, db
+from . import auth, billing, brandkit, db
 from .models import (
     AuthResponse,
     AuthUserOut,
+    BrandKitOut,
+    BrandKitRequest,
     CheckoutRequest,
     CheckoutResponse,
     ClipOut,
@@ -51,6 +57,31 @@ _BILLING_OFF = (
     "Billing isn't enabled on this server yet — plan upgrades will activate "
     "once Stripe is configured."
 )
+# Honest, not coy: it names the feature, the plan that carries it, and what
+# happens meanwhile (BRANDKIT.md — the free tier's mark IS the upsell).
+_BRAND_KIT_FORBIDDEN = (
+    "A brand kit is included from the Starter plan up. Your clips render with "
+    "the ClipCatalyst mark for now — upgrade to put your own logo and caption "
+    "colour on them."
+)
+_BRAND_UNSUPPORTED_BODY = (
+    "Send the brand kit as multipart/form-data (logo, caption_color, "
+    "show_logo) or as JSON."
+)
+_BRAND_UNREADABLE_LOGO = (
+    "That logo couldn't be read — upload the file itself, or a base64 "
+    "'data:' URL of it."
+)
+_BRAND_BAD_COLOR = (
+    "That caption colour isn't a hex value — use #rrggbb (for example #a78bfa)."
+)
+# The ceiling on the whole PUT body, as opposed to MAX_LOGO_BYTES on the decoded
+# logo: a 2 MB logo is ~2.7 MB once base64'd into a data: URL, plus the JSON or
+# multipart envelope around it. Bodies past this are refused before they are
+# buffered; what survives is still measured after decoding.
+_BRAND_MAX_BODY_BYTES = 4_000_000
+
+_DATA_URL_RE = re.compile(r"^data:([^;,]*)((?:;[^;,]*)*),", re.IGNORECASE)
 
 
 def _rate_limit(request: Request, route: str) -> None:
@@ -124,6 +155,169 @@ def _signed_in(user: dict) -> AuthResponse:
             plan_status=user["plan_status"],
         ),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Brand kit storage (BRANDKIT.md §3a). The entitlement is re-read from the
+# EFFECTIVE plan on every call, and the bytes are trusted for nothing: the type
+# is sniffed, the size is measured after decoding, and the filename is built
+# from the account id and a whitelisted extension — never from the upload.
+# --------------------------------------------------------------------------- #
+
+
+def _brand_logo_file(settings, user: dict) -> Path | None:
+    """The account's stored logo as a real file, or None.
+
+    A row naming a file that is no longer on disk reads as "no logo": the kit
+    the client is shown must describe what a render would actually use.
+    """
+    path = brandkit.logo_abs_path(settings, str(user.get("brand_logo_path") or ""))
+    return path if path is not None and path.is_file() else None
+
+
+def _brand_out(settings, user: dict) -> BrandKitOut:
+    """The stored kit as the client sees it — the logo as a URL, not bytes."""
+    logo = _brand_logo_file(settings, user)
+    return BrandKitOut(
+        # Relative when public_base_url is empty, exactly like clip urls: the
+        # SPA resolves it against the API origin it is already talking to.
+        logo_url=f"{settings.public_base_url}/v1/me/brand/logo" if logo else None,
+        caption_color=str(user.get("brand_caption_color") or "") or None,
+        show_logo=bool(user.get("brand_show_logo", 1)),
+    )
+
+
+def _remove_brand_logos(settings, user_id: str) -> None:
+    """Drop every stored logo for an account, whatever extension it carries.
+
+    One account owns at most one logo, but a PNG replaced by a WebP would
+    otherwise leave the old file behind — and the row would still be the only
+    thing saying which of the two is current. Never raises: a kit must never
+    break, and neither must its cleanup.
+    """
+    for content_type in brandkit.LOGO_EXTENSIONS:
+        name = brandkit.logo_storage_name(user_id, content_type)
+        path = brandkit.logo_abs_path(settings, name) if name else None
+        if path is None:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _store_brand_logo(settings, user_id: str, data: bytes) -> str:
+    """Write a validated logo and return the name to store on the user row."""
+    content_type, error = brandkit.validate_logo_bytes(data)
+    if error is not None:
+        # 413 for "too big" and 400 for "not an image we can use" — the body is
+        # the message the panel would have shown for the same file.
+        oversize = len(data) > brandkit.MAX_LOGO_BYTES
+        raise HTTPException(status_code=413 if oversize else 400, detail=error)
+    assert content_type is not None
+    name = brandkit.logo_storage_name(user_id, content_type)
+    if name is None:  # an account id that could not make a safe filename
+        raise HTTPException(
+            status_code=400, detail="This account can't store a brand logo."
+        )
+    settings.ensure_dirs()
+    _remove_brand_logos(settings, user_id)
+    dest = settings.data_dir / name
+    part = dest.with_suffix(dest.suffix + ".part")
+    try:
+        part.write_bytes(data)
+        part.replace(dest)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    return name
+
+
+def _decode_data_url(value: str) -> bytes | None:
+    """The bytes inside a base64 ``data:`` URL, or None if it isn't one.
+
+    The media type declared in the URL is read for nothing — the bytes are
+    sniffed afterwards like any other upload. Only the base64 form is accepted,
+    which is the only form ``FileReader.readAsDataURL`` produces.
+    """
+    match = _DATA_URL_RE.match(value.strip())
+    if match is None or ";base64" not in (match.group(2) or "").lower():
+        return None
+    try:
+        return base64.b64decode("".join(value[match.end() :].split()), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _form_flag(value: object, default: bool) -> bool:
+    """An HTML form's idea of a boolean ("true"/"1"/"on"), else the default."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "on", "yes")
+    return default
+
+
+async def _read_brand_body(request: Request) -> tuple[bytes | None, str, bool]:
+    """Parse a brand PUT — multipart or JSON — into (logo bytes, colour, show).
+
+    A PUT carries the WHOLE kit: an absent logo means the kit has none, not
+    "keep whatever is on the server". The panel holds the complete kit locally
+    and syncs it whole, and PUT that means anything else stops being PUT.
+    """
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    declared = request.headers.get("content-length")
+    if declared is None:
+        raise HTTPException(status_code=411, detail="Content-Length header is required.")
+    try:
+        length = int(declared)
+    except ValueError:
+        raise HTTPException(
+            status_code=411, detail="Content-Length header is invalid."
+        ) from None
+    if length > _BRAND_MAX_BODY_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"That logo is bigger than the {brandkit.format_mb(brandkit.MAX_LOGO_BYTES)}"
+                " MB limit."
+            ),
+        )
+
+    if content_type == "multipart/form-data":
+        form = await request.form()
+        try:
+            field = form.get("logo")
+            if isinstance(field, UploadFile):
+                data = await field.read()
+            elif isinstance(field, str) and field.strip():
+                data = _decode_data_url(field)
+                if data is None:
+                    raise HTTPException(status_code=400, detail=_BRAND_UNREADABLE_LOGO)
+            else:
+                data = None
+            color = form.get("caption_color")
+            return (
+                data,
+                color.strip() if isinstance(color, str) else "",
+                _form_flag(form.get("show_logo"), default=True),
+            )
+        finally:
+            await form.close()
+
+    if content_type == "application/json":
+        try:
+            payload = BrandKitRequest.model_validate(await request.json())
+        except (ValidationError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="That brand kit payload isn't valid JSON."
+            ) from None
+        data = None
+        if payload.logo and payload.logo.strip():
+            data = _decode_data_url(payload.logo)
+            if data is None:
+                raise HTTPException(status_code=400, detail=_BRAND_UNREADABLE_LOGO)
+        return data, (payload.caption_color or "").strip(), payload.show_logo
+
+    raise HTTPException(status_code=415, detail=_BRAND_UNSUPPORTED_BODY)
 
 
 @asynccontextmanager
@@ -245,7 +439,108 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 max_height=entitlements.max_height,
                 watermark_required=entitlements.watermark_required,
                 clips_per_month=entitlements.clips_per_month,
+                brand_kit=entitlements.brand_kit,
             ),
+            # The stored kit, always — a kit outlives a downgrade on the row
+            # (nothing deletes a creator's logo because they changed plan) and
+            # `entitlements.brand_kit` above says whether a render will use it.
+            brand=_brand_out(get_settings(), user),
+        )
+
+    def _require_brand_kit(user: dict) -> None:
+        """403 unless the EFFECTIVE plan carries a brand kit.
+
+        Read from the plan table enforcement uses, not from the request or the
+        stored row, so a lapsed subscription stops being able to change what
+        renders the moment it lapses.
+        """
+        if not PLANS[effective_plan(user)].brand_kit:
+            raise HTTPException(status_code=403, detail=_BRAND_KIT_FORBIDDEN)
+
+    @router.put("/me/brand", response_model=BrandKitOut)
+    async def put_brand(
+        request: Request,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> BrandKitOut:
+        """Replace this account's brand kit (multipart or JSON).
+
+        Nothing the client sends is trusted beyond the bytes themselves: the
+        content type is SNIFFED from those bytes, the size is measured after
+        decoding, the colour is re-validated with the same rule as the
+        TypeScript, and the file lands under a name built from the account id
+        and a whitelisted extension.
+        """
+        _no_store(response)
+        settings = get_settings()
+        _require_brand_kit(user)
+        data, raw_color, show_logo = await _read_brand_body(request)
+
+        color = ""
+        if raw_color:
+            color = brandkit.normalize_hex(raw_color) or ""
+            if not color:
+                raise HTTPException(status_code=400, detail=_BRAND_BAD_COLOR)
+
+        if data is None:
+            _remove_brand_logos(settings, user["id"])
+            stored = ""
+        else:
+            stored = _store_brand_logo(settings, user["id"], data)
+
+        db.update_user(
+            user["id"],
+            brand_logo_path=stored,
+            brand_caption_color=color,
+            brand_show_logo=int(show_logo),
+        )
+        return _brand_out(settings, db.get_user_by_id(user["id"]) or user)
+
+    @router.delete("/me/brand", response_model=BrandKitOut)
+    def delete_brand(
+        response: Response, user: dict = Depends(auth.require_session)
+    ) -> BrandKitOut:
+        """Clear the stored kit — logo file included.
+
+        Deliberately NOT gated on the plan: taking your own logo off our
+        servers must not depend on what you are paying today, or a downgrade
+        would strand it there with no way to remove it.
+        """
+        _no_store(response)
+        settings = get_settings()
+        _remove_brand_logos(settings, user["id"])
+        db.update_user(
+            user["id"],
+            brand_logo_path="",
+            brand_caption_color="",
+            brand_show_logo=1,
+        )
+        return BrandKitOut()
+
+    @router.get("/me/brand/logo")
+    def get_brand_logo(user: dict = Depends(auth.require_session)) -> FileResponse:
+        """The account's own logo, for the panel's preview on a new device."""
+        settings = get_settings()
+        path = _brand_logo_file(settings, user)
+        if path is None:
+            raise HTTPException(status_code=404, detail="No brand logo stored.")
+        media_type = brandkit.LOGO_MEDIA_TYPES.get(path.suffix.lstrip("."))
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                # One account's private asset: a shared cache must not keep it,
+                # and the browser must revalidate rather than serve a logo the
+                # owner has since replaced.
+                "Cache-Control": "private, max-age=0",
+                # An uploaded SVG is markup we serve from our own origin. The
+                # session bearer means it cannot be navigated to with
+                # credentials, and these two headers close the rest: no
+                # sniffing into something executable, no subresources or
+                # scripts if it is ever opened directly.
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
         )
 
     def _require_gateway() -> billing.Gateway:

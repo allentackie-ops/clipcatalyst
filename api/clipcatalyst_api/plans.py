@@ -16,13 +16,26 @@ class Plan:
     clips_per_month: int | None  # None = unlimited (enterprise)
     max_height: int
     watermark_required: bool
+    # The creator's own logo and caption colour on cloud renders (BRANDKIT.md).
+    # Deliberately its own field rather than `not watermark_required`: the
+    # pricing page sells them as two promises, and reading one off the other
+    # would silently re-price whichever moves first.
+    brand_kit: bool
 
 
 PLANS: dict[str, Plan] = {
-    "free": Plan(clips_per_month=3, max_height=1280, watermark_required=True),
-    "starter": Plan(clips_per_month=30, max_height=1920, watermark_required=False),
-    "pro": Plan(clips_per_month=100, max_height=3840, watermark_required=False),
-    "enterprise": Plan(clips_per_month=None, max_height=3840, watermark_required=False),
+    "free": Plan(
+        clips_per_month=3, max_height=1280, watermark_required=True, brand_kit=False
+    ),
+    "starter": Plan(
+        clips_per_month=30, max_height=1920, watermark_required=False, brand_kit=True
+    ),
+    "pro": Plan(
+        clips_per_month=100, max_height=3840, watermark_required=False, brand_kit=True
+    ),
+    "enterprise": Plan(
+        clips_per_month=None, max_height=3840, watermark_required=False, brand_kit=True
+    ),
 }
 
 # A subscription keeps its entitlements through the grace states Stripe

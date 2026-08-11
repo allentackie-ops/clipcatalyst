@@ -1,5 +1,4 @@
 import { Badge, Button, Card, Container, SectionHeading } from "@/components/ui";
-import { cloudEnabled } from "@/components/studio/cloud";
 
 type Tier = {
   name: string;
@@ -10,15 +9,12 @@ type Tier = {
   features: string[];
   limitations?: string[];
   cta: string;
-  href: string;
   /**
-   * CTA for builds where accounts are live (NEXT_PUBLIC_CLOUD_API set): the
-   * button opens /account, and the paid tiers deep-link straight into that
-   * plan's checkout. Omitted (Enterprise) → the waitlist CTA stands, and with
-   * the API unset every tier keeps today's waitlist CTA exactly.
+   * Where the button goes. Free opens the Studio, which needs no account and
+   * works immediately; the paid tiers open /account, which starts checkout
+   * when billing is configured and says so plainly when it is not.
    */
-  liveCta?: string;
-  liveHref?: string;
+  href: string;
   highlight?: boolean;
 };
 
@@ -29,10 +25,8 @@ const tiers: Tier[] = [
     price: "$0",
     features: ["3 clips / month"],
     limitations: ["720p export, watermarked"],
-    cta: "Get early access",
-    href: "#waitlist",
-    liveCta: "Start free",
-    liveHref: "/account",
+    cta: "Get started",
+    href: "/studio",
   },
   {
     name: "Starter",
@@ -45,10 +39,8 @@ const tiers: Tier[] = [
       "No watermark",
       "Brand kit",
     ],
-    cta: "Reserve Starter",
-    href: "#waitlist",
-    liveCta: "Get Starter",
-    liveHref: "/account?plan=starter",
+    cta: "Get Starter",
+    href: "/account?plan=starter",
   },
   {
     name: "Pro",
@@ -62,10 +54,8 @@ const tiers: Tier[] = [
       "AI hook generator",
       "Auto B-roll",
     ],
-    cta: "Reserve Pro",
-    href: "#waitlist",
-    liveCta: "Get Pro",
-    liveHref: "/account?plan=pro",
+    cta: "Get Pro",
+    href: "/account?plan=pro",
     highlight: true,
   },
   {
@@ -80,8 +70,8 @@ const tiers: Tier[] = [
       "Team workspace",
       "Custom branding",
     ],
-    cta: "Talk to us",
-    href: "#waitlist",
+    cta: "Get started",
+    href: "/account",
   },
 ];
 
@@ -128,11 +118,8 @@ function DashIcon() {
 }
 
 function TierBody({ tier }: { tier: Tier }) {
-  // cloudEnabled is a build-time constant: with NEXT_PUBLIC_CLOUD_API unset
-  // these collapse to tier.cta/tier.href, so the rendered markup of today's
-  // public build is unchanged.
-  const cta = cloudEnabled && tier.liveCta ? tier.liveCta : tier.cta;
-  const href = cloudEnabled && tier.liveHref ? tier.liveHref : tier.href;
+  // Single destination per tier now — see the Tier type.
+  const { cta, href } = tier;
   return (
     <div className="flex h-full flex-col p-6 lg:p-7">
       <div className="flex items-center justify-between gap-2">

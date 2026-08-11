@@ -91,8 +91,8 @@ function OfflineCard() {
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Button href="/studio">Open Studio</Button>
-          <Button href="/#waitlist" variant="ghost">
-            Join the waitlist
+          <Button href="/#pricing" variant="ghost">
+            See the plans
           </Button>
         </div>
       </Card>

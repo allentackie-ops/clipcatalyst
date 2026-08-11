@@ -45,7 +45,7 @@ export default function Hero() {
                 aria-hidden
                 className="h-1.5 w-1.5 rounded-full bg-signal-400 animate-pulse-soft"
               />
-              Early access &mdash; waitlist open
+              Free &mdash; no signup, no upload
             </Badge>
 
             <h1 className="mt-6 font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl lg:leading-[1.05]">
@@ -62,17 +62,18 @@ export default function Hero() {
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-              <Button href="#waitlist" size="lg">
-                Get early access
+              <Button href="/studio" size="lg">
+                Get started
               </Button>
-              <Button href="/studio" variant="secondary" size="lg">
-                Clip a video free &rarr;
+              <Button href="/demo" variant="secondary" size="lg">
+                Watch the tour &rarr;
               </Button>
             </div>
 
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-500">
-              Free = Studio beta &mdash; runs entirely in your browser, no
-              upload. The 90-second cloud pipeline arrives with early access.
+              Clipping runs in your browser &mdash; nothing to install, nothing
+              uploaded, and your video never leaves your device. Desktop
+              Chrome, Edge, or Firefox.
             </p>
 
             {/* Stat strip */}

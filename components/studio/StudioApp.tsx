@@ -229,12 +229,12 @@ function MobileUnsupportedView({ verdict }: { verdict: CapabilityVerdict }) {
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-400">
           Nothing is wrong with your video. Open this page in Chrome, Edge, or
           Firefox on a computer and it runs end to end. Cloud clipping — upload
-          once, get clips back on any device — is what the waitlist unlocks.
+          once, get clips back on any device — is coming.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Button href="/demo">Watch the product tour</Button>
-          <Button href="/#waitlist" variant="secondary">
-            Join the waitlist
+          <Button href="/#pricing" variant="secondary">
+            See the plans
           </Button>
           <Button href="/" variant="ghost">
             Back home
@@ -306,11 +306,7 @@ function ErrorView({
             <Link href="/demo" className="text-brand-300 underline-offset-4 hover:underline">
               Watch the product tour
             </Link>{" "}
-            or{" "}
-            <Link href="/#waitlist" className="text-brand-300 underline-offset-4 hover:underline">
-              join the waitlist
-            </Link>{" "}
-            for cloud clipping — or open Studio on a desktop.
+            — or open Studio on a desktop, where it runs end to end.
           </p>
         ) : null}
       </div>

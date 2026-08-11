@@ -3,7 +3,7 @@ import { Container, SectionHeading } from "@/components/ui";
 const faqs: { q: string; a: string }[] = [
   {
     q: "How is 90-second processing actually possible?",
-    a: "The cloud pipeline runs all seven layers — transcription, scoring, reframing, captioning — on optimized GPU clusters in parallel, not one stage at a time; that's what early access unlocks. Intelligent caching means repeat runs on the same footage are even faster. Median target from upload to first finished clip: under 90 seconds, versus 10–20 minutes for OpusClip or Klap.",
+    a: "The cloud pipeline runs all seven layers — transcription, scoring, reframing, captioning — on optimized GPU clusters in parallel, not one stage at a time. Intelligent caching means repeat runs on the same footage are even faster. Median target from upload to first finished clip: under 90 seconds, versus 10–20 minutes for OpusClip or Klap.",
   },
   {
     q: "How accurate is the clip selection?",
@@ -27,7 +27,7 @@ const faqs: { q: string; a: string }[] = [
   },
   {
     q: "What can the free Studio beta do right now?",
-    a: "Studio runs Whisper AI and the virality engine entirely in your browser — your video never leaves your device. Give it a talking video (15 minutes or less works best) and it cuts 9:16 captioned clips, each scored 0–100. The 90-second cloud pipeline that chews through hour-long podcasts is what the waitlist unlocks.",
+    a: "Studio runs Whisper AI and the virality engine entirely in your browser — your video never leaves your device. Give it a talking video (15 minutes or less works best) and it cuts 9:16 captioned clips, each scored 0–100. The 90-second cloud pipeline that chews through hour-long podcasts is coming next.",
   },
   {
     q: "Who owns my footage?",

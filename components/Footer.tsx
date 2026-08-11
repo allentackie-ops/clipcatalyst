@@ -28,7 +28,7 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
       { label: "How it works", href: "#how-it-works" },
       { label: "Under the hood", href: "#pipeline" },
       { label: "FAQ", href: "#faq" },
-      { label: "API docs", href: "#waitlist" },
+      { label: "Pricing", href: "#pricing" },
     ],
   },
   {

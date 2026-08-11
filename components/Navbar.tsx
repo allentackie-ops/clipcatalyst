@@ -40,7 +40,7 @@ export default function Navbar() {
           ))}
         </nav>
         <div className="flex items-center gap-3">
-          <Button href="/#waitlist">Get early access</Button>
+          <Button href="/studio">Get started</Button>
           <button
             type="button"
             aria-label="Open menu"

@@ -241,6 +241,35 @@ one bucket, so a single attacker at a trickle can 429 login and signup for
 (the Caddy `header_up` above) — a proxy that appends leaves the leftmost entry
 under the client's control.
 
+`CC_TRUSTED_PROXIES=0.0.0.0/0` (or `::/0`) is **refused at startup**, not
+accepted quietly. Trusting every address makes every direct client its own
+proxy: it picks its own bucket by rotating the header per attempt, and the
+limiter stops existing with nothing in the logs to say so. Name the proxy.
+
+#### Where the counters live, and what happens when Redis is down
+
+The counters are an atomic `INCR` in **Redis** — the same instance Celery
+brokers on (`CC_REDIS_URL`), so there is nothing extra to run. Each key names
+the minute it belongs to and is given a TTL, so a finished window is Redis's
+to reclaim: nothing sweeps, nothing evicts, and the limit is shared across
+every API process instead of being multiplied by their number. On
+`CC_QUEUE=eager` (dev, tests) there is no Redis to reach and the counters are
+process-local — fine for one developer, not a deployment mode.
+
+If Redis cannot be reached, credential attempts are **refused** (429). That is
+deliberate: an attempt that cannot be counted is an attempt that is not
+limited, and whoever can knock Redis over would otherwise also be un-limiting
+login. It costs little here because Redis is the broker too — a box that
+cannot reach it cannot render a clip either, so the outage already exists.
+The trade is real in the other direction, though: a brief blip turns a
+legitimate sign-in into "please wait a minute". To take that side instead:
+
+```
+CC_RATE_LIMIT_FAIL_OPEN=on           # default off — refuse when Redis is down
+```
+
+Either way the cause is in the API log (once a minute, not once a request).
+
 For the same reason uvicorn is started **without** `--proxy-headers` in the
 image. If you want `request.client.host` itself rewritten (access logs, other
 middleware), override the command with both flags and name the proxy — never
@@ -259,6 +288,12 @@ clips, and job rows live before the hourly reaper deletes them. It is a storage
 and privacy control as much as a cleanup one: user videos should not sit on the
 box forever. Lower it if you handle sensitive footage; raise it if users need
 longer to fetch their clips.
+
+The same hourly beat task also reconciles jobs abandoned by a dead worker,
+returning the monthly quota they reserved at `/start`. Run `celery beat` — with
+no beat process nothing reaps and nothing refunds until the API restarts, and a
+job whose row is deleted while still holding a reservation cannot be refunded
+at all.
 
 ### 7.4 How the frontend sends the token — and the honest caveat
 

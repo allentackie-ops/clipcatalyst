@@ -15,7 +15,7 @@ import shutil
 import time
 from datetime import datetime, timedelta, timezone
 
-from celery.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import SoftTimeLimitExceeded, Terminated
 
 from . import db
 from .pipeline.croptrack import CropTrack, CropTrackOptions, build_crop_track
@@ -63,6 +63,39 @@ _TIMEOUT_ERROR = (
 _TARGET_ASPECT = 9 / 16
 _DEFAULT_SOURCE_ASPECT = 16 / 9
 
+# Slack on top of one render window before a queued/processing row is treated
+# as abandoned by reconcile_stalled.
+STALL_SLACK_SECONDS = 300
+
+# Celery's own control-flow signals: the task is being torn down, which is not
+# the same thing as one stage of it failing. BOTH subclass Exception, so every
+# best-effort `except Exception` below would otherwise swallow them and carry
+# on working inside a task that is already dying — the soft time limit fires
+# ~60 s before the HARD kill, so a per-clip handler that "recovers" from it
+# spends that grace on the next clip and gets SIGKILLed mid-render, leaving the
+# row stuck in `processing` still holding its owner's quota. Re-raised, they
+# reach process_job, which records the honest timeout and releases the
+# reservation while there is still time to write it.
+_CONTROL_SIGNALS = (SoftTimeLimitExceeded, Terminated)
+
+
+class _LostClaim(Exception):
+    """This run no longer owns the job row, so it must write NOTHING.
+
+    Raised at the two points where ownership is decided: the queued→processing
+    claim that opens a run, and the processing→done transition that closes it.
+    Losing either means somebody else has already written a terminal status and
+    settled the reservation — the stall reconciler failing an abandoned-looking
+    row, the reaper deleting an expired one, or a second delivery of the same
+    task. Whatever this run produced is not billed to anybody, so publishing it
+    would be giving clips away; whatever quota it thought it held is already
+    back in the owner's month, so settling would take it a second time.
+
+    Handled in process_job, which stops the run without a status write and
+    without a settlement — deliberately NOT a PipelineError, which would land
+    in _fail and write the very terminal state we must not write.
+    """
+
 
 class _Throttle:
     """Rate-limits progress writes to at most one per interval."""
@@ -83,8 +116,20 @@ class _Throttle:
 def process_job(self, job_id: str) -> None:
     settings = get_settings()
     storage = get_storage(settings)
+    # Whether this run owns the job. A duplicate delivery that loses the claim
+    # owns nothing on disk — see the `finally`.
+    owns_job = True
     try:
         _run(job_id, settings, storage)
+    except _LostClaim:
+        # Ordered FIRST: every handler below writes a terminal status, which is
+        # precisely what a run that lost its row may not do. Stop cleanly and
+        # drop any output this run produced (see _discard_output).
+        owns_job = False
+        logger.warning(
+            "job %s: the row moved out from under this run; discarding it", job_id
+        )
+        _discard_output(settings, job_id)
     except SoftTimeLimitExceeded:
         # Fired ~60 s before the hard kill: record a terminal failure while we
         # still can, then re-raise so Celery marks the task FAILURE too.
@@ -101,28 +146,64 @@ def process_job(self, job_id: str) -> None:
     finally:
         # On every exit that isn't a hard-kill, drop the uploaded source: it is
         # never needed again once the job is terminal (done or failed).
-        _remove_source(storage, settings, job_id)
+        #
+        # Unless this run lost the claim. Celery delivers at least once, so a
+        # worker restart or an expired visibility timeout can start a second
+        # run of a job another worker is already rendering. That duplicate owns
+        # nothing: deleting the source here pulls the file out from under the
+        # owning run mid-ffmpeg, which fails a perfectly good job and tells the
+        # user to re-export a video that was never the problem. The owning run
+        # removes the source on its own exit.
+        if owns_job:
+            _remove_source(storage, settings, job_id)
 
 
 def _fail(job_id: str, message: str) -> None:
-    """Record a terminal failed status; never let bookkeeping raise on us.
+    """Record a terminal failed status and release the quota, together.
 
-    A job that fails rendered nothing the owner asked for, so the whole quota
-    reservation /start took goes back — released BEFORE the status write, so a
-    process that dies between the two (the soft time limit fires ~60 s before
-    the hard kill) leaves a non-terminal row that boot-time reconciliation
-    still sweeps, rather than a terminal one holding quota nobody will ever
-    return. Settling is once-only, so this is safe on a Celery retry and after
-    a partial success that already settled.
+    A job that fails rendered nothing the owner asked for, so the whole
+    reservation /start took goes back. Status write and release are one
+    transaction (db.finalize_job), so a process that dies mid-way — the soft
+    time limit fires ~60 s before the hard kill — leaves either both or
+    neither, never a terminal row holding quota nobody will hand back.
+
+    The guard is `LIVE_STATUSES`, so this fails only a row that is still
+    genuinely queued or processing. A False return means the job is already
+    terminal: the reconciler failed and refunded it, or it finished. Either
+    way the reservation has been settled by its rightful owner and there is
+    nothing here to overwrite — which is also why a Celery retry and a failure
+    path arriving after a partial success are both no-ops.
     """
     try:
-        db.settle_usage(job_id, 0)
-    except Exception:
-        logger.exception("job %s: could not release the quota reservation", job_id)
-    try:
-        db.update_job(job_id, status="failed", error=message)
+        if not db.finalize_job(
+            job_id, expect=db.LIVE_STATUSES, to="failed", rendered=0, error=message
+        ):
+            logger.warning(
+                "job %s: already terminal; leaving its status and quota alone", job_id
+            )
     except Exception:
         logger.exception("job %s: could not record failed status", job_id)
+
+
+def _discard_output(settings: Settings, job_id: str) -> None:
+    """Bin clips rendered by a run that turned out not to own its job row.
+
+    ``GET /v1/files/{job_id}/{name}`` serves whatever sits under the job's
+    clips directory — it authorizes on the row, not on clips_json — so output
+    left behind by a lost run is downloadable against a row that has already
+    been failed and REFUNDED. That is the free-clips hole, so the files go.
+
+    Only for a row that is failed or gone. A row still `processing` or already
+    `done` belongs to somebody else — a duplicate delivery mid-render, or the
+    run that legitimately finished — and their clips are not ours to delete.
+    """
+    try:
+        job = db.get_job(job_id)
+        if job is not None and job["status"] != "failed":
+            return
+        shutil.rmtree(settings.clips_dir / job_id, ignore_errors=True)
+    except Exception:
+        logger.warning("job %s: could not discard the lost run's output", job_id)
 
 
 def _remove_source(storage: Storage, settings: Settings, job_id: str) -> None:
@@ -156,17 +237,35 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
         raise PipelineError("This job no longer exists.")
 
     settings.ensure_dirs()
-    src = storage.source_path(job_id)
 
-    # --- probe -----------------------------------------------------------
-    db.update_job(
+    # --- claim -------------------------------------------------------------
+    # The row decides who may run this job, and this is a transition the worker
+    # can LOSE. It used to be a blind `update_job(status="processing")`, which
+    # could not lose: a job the reconciler had already failed and refunded got
+    # flipped straight back into the pipeline and rendered for free.
+    #
+    # The trigger is not an attacker, it is a queue backlog. reconcile_stalled
+    # fails anything still queued after render_timeout_s + slack, and a busy box
+    # leaves jobs queued for exactly that long — so every backlogged job was
+    # delivered unbilled, and its owner's month kept resetting to zero.
+    #
+    # Winning the claim is what makes the reservation ours to settle later. The
+    # source download (S3) happens after it, so a run with no claim does no work
+    # at all.
+    if not db.transition_status(
         job_id,
-        status="processing",
+        expect="queued",
+        to="processing",
         stage="probe",
         progress=0.0,
         detail="Reading the video",
         error=None,
-    )
+    ):
+        raise _LostClaim(job_id)
+
+    src = storage.source_path(job_id)
+
+    # --- probe -----------------------------------------------------------
     info = probe_media(src, settings)
 
     # --- transcribe ------------------------------------------------------
@@ -265,6 +364,8 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
                     ),
                 )
             )
+        except _CONTROL_SIGNALS:
+            raise  # see _CONTROL_SIGNALS: the task is dying, not the tracker
         except Exception:
             # A clip that can't be tracked still renders — centered, as before.
             logger.warning(
@@ -310,6 +411,11 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
                 src, plan, out_path, opts, settings, on_render_progress, tracks[index]
             )
             storage.put_clip(job_id, rendered.path, name)
+        except _CONTROL_SIGNALS:
+            # see _CONTROL_SIGNALS: swallowing this here reported an unusual
+            # codec instead of the timeout, and then burned the remaining
+            # grace rendering the NEXT clip straight into the hard kill.
+            raise
         except PipelineError as exc:
             failed_count += 1
             logger.warning("job %s: clip %d/%d failed: %s", job_id, index + 1, total, exc)
@@ -328,32 +434,44 @@ def _run(job_id: str, settings: Settings, storage: Storage) -> None:
     if not clips:
         raise PipelineError(_ALL_RENDERS_FAILED_ERROR)
 
-    db.set_clips(job_id, clips)
     done_detail = f"Rendered {len(clips)} clip{'s' if len(clips) != 1 else ''}"
     if failed_count:
         done_detail += f" ({failed_count} failed)"
-    db.update_job(
-        job_id,
-        status="done",
-        stage="render",
-        progress=1.0,
-        detail=done_detail,
-        error=None,
-    )
+
+    # Publishing the clips, going terminal, and settling the quota are ONE
+    # transaction guarded on the status this run claimed.
+    #
     # Quota bookkeeping: /start already RESERVED this job's whole `count`
     # against the owner's month, so completion only settles the difference —
     # the owner keeps the clips that ACTUALLY rendered and gets the rest back
     # (a failed clip costs nothing). This is the same table /v1/me and the
     # start-time reservation read, so the account page can never disagree with
-    # enforcement. Anonymous jobs reserved nothing, so this is a no-op for
-    # them, and settling twice (a Celery retry) is a no-op too.
-    db.settle_usage(job_id, len(clips))
+    # enforcement. Anonymous jobs reserved nothing, so this is a no-op for them.
+    #
+    # Losing the guard is the reverse race: the reconciler failed this row
+    # mid-run and already handed the reservation back. Writing `done` then
+    # would publish clips against a refunded reservation, and settling would
+    # bill a month that has already been returned — so we do neither, and
+    # clips_json is never written either, because it moves in this same
+    # statement rather than just before it.
+    if not db.finalize_job(
+        job_id,
+        expect="processing",
+        to="done",
+        rendered=len(clips),
+        clips_json=db.encode_clips(clips),
+        stage="render",
+        progress=1.0,
+        detail=done_detail,
+        error=None,
+    ):
+        raise _LostClaim(job_id)
 
 
 def _diarize_transcript(
     job_id: str, src, transcript: Transcript, settings: Settings
 ) -> tuple[Transcript, int]:
-    """Stamp `word.speaker` onto the transcript's words; NEVER raises.
+    """Stamp `word.speaker` onto the transcript's words; never fails the job.
 
     Diarization is best-effort by contract (SPEAKERS.md): any failure — ffmpeg
     dying, numpy missing, a numeric surprise — degrades to unassigned words,
@@ -374,6 +492,8 @@ def _diarize_transcript(
             for w, s in zip(transcript.words, result.word_speakers)
         ]
         return dataclasses.replace(transcript, words=words), result.speaker_count
+    except _CONTROL_SIGNALS:
+        raise  # see _CONTROL_SIGNALS: not a diarization miss, a dying task
     except Exception:
         logger.warning(
             "job %s: diarization failed; captions stay single-color",
@@ -452,12 +572,36 @@ def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> 
     }
 
 
+def reconcile_stalled() -> int:
+    """Fail — and refund — jobs whose worker died mid-run. Returns the count.
+
+    Anything still queued/processing whose last update predates a full render
+    window plus slack has nobody left working on it, so nothing will ever
+    settle the quota it reserved at /start. Both callers share this cutoff: the
+    API's startup hook and the hourly beat sweep. Running it from the sweep as
+    well is what makes the refund independent of restarts — an API process that
+    stays up for weeks would otherwise never reconcile anything.
+
+    Failing a row here is now genuinely terminal: db.reconcile_stalled fails and
+    refunds in one guarded transaction, and _run cannot claim (or finish) a job
+    it no longer owns. Before that, a backlog longer than the stall window meant
+    the sweep refunded jobs the worker then went on to render and deliver.
+    """
+    settings = get_settings()
+    db.init_db()
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=settings.render_timeout_s + STALL_SLACK_SECONDS
+    )
+    return db.reconcile_stalled(cutoff.isoformat(timespec="milliseconds"))
+
+
 def reap_expired() -> int:
     """Delete jobs (rows + rendered clips + source) older than the TTL.
 
-    Cutoff is ``now - settings.job_ttl_hours``. For each expired job we remove
-    its clips directory, any stray source file on disk, and the DB row. Returns
-    the number of jobs reaped. Safe to run repeatedly; unit-testable on its own.
+    Cutoff is ``now - settings.job_ttl_hours``. For each expired job we release
+    any quota it is still holding, then remove its clips directory, any stray
+    source file on disk, and the DB row. Returns the number of jobs reaped.
+    Safe to run repeatedly; unit-testable on its own.
     """
     settings = get_settings()
     db.init_db()
@@ -469,16 +613,42 @@ def reap_expired() -> int:
     reaped = 0
     for job in db.list_jobs_older_than(cutoff):
         job_id = job["id"]
+        # Settle BEFORE the row goes. The reservation's only settlement token
+        # lives on the job row itself (jobs.usage_reserved), so a row deleted
+        # while it still holds one bills the owner's month forever with nothing
+        # left anywhere to hand it back — reconcile_stalled cannot recover a
+        # row that no longer exists. This reaps by created_at regardless of
+        # status, so it is the last thing standing between a job stuck queued
+        # or processing and a free account losing a month it never rendered.
+        # Settlement is once-only and the counter is clamped at zero, so a job
+        # that already settled (every completed one) pays nothing extra here.
+        db.settle_usage(job_id, 0)
+        # Then drop the ROW before the files. A worker finishing inside this
+        # window would otherwise win its processing→done guard against a row
+        # about to be deleted and write clips after the rmtree, leaving files
+        # on disk with nothing left to reap them. With the row gone first, that
+        # worker loses its claim instead and discards its own output.
+        db.delete_job(job_id)
         shutil.rmtree(settings.clips_dir / job_id, ignore_errors=True)
         _remove_source(storage, settings, job_id)
-        db.delete_job(job_id)
         reaped += 1
     return reaped
 
 
 @celery_app.task(name="clipcatalyst.reap_expired")
 def reap_expired_task() -> int:
-    """Celery entry point for the reaper (scheduled hourly via beat)."""
+    """Celery entry point for the hourly maintenance sweep (run by beat).
+
+    Reconciliation runs FIRST and from here, not only from the API's startup
+    hook: the hook fires on a restart, and a box that does not restart inside
+    CC_JOB_TTL_HOURS would let the reaper delete a stranded row before any
+    refund ran. Reconciling on the same hourly tick means a job abandoned by a
+    dead worker gets its quota back within the hour, whatever the API process
+    is doing. Returns the reaped count, as before.
+    """
+    stalled = reconcile_stalled()
+    if stalled:
+        logger.info("reconciled %d stalled job(s)", stalled)
     count = reap_expired()
     if count:
         logger.info("reaper removed %d expired job(s)", count)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import stripe
@@ -39,7 +39,7 @@ from .models import (
 from .plans import PLANS, effective_plan
 from .settings import get_settings
 from .storage import get_storage
-from .worker import process_job
+from .worker import process_job, reconcile_stalled
 
 API_VERSION = "0.1.0"
 
@@ -53,14 +53,22 @@ _BILLING_OFF = (
 )
 
 
-def _client_ip(request: Request) -> str:
-    """Who to rate-limit, resolved through the trusted-proxy rules (auth.py)."""
+def _rate_limit(request: Request, route: str) -> None:
+    """Count one attempt from this request against `route`'s window.
+
+    The address counted is whoever the trusted-proxy rules in auth.py say the
+    client is: the socket peer, unless the peer is a proxy the operator named
+    in CC_TRUSTED_PROXIES. The counting itself is a windowed INCR in Redis
+    (auth.enforce_rate_limit), so it is shared across every process serving
+    this API rather than per-worker.
+    """
     peer = request.client.host if request.client is not None else "unknown"
-    return auth.client_ip(
+    client = auth.client_ip(
         peer,
         request.headers.get("X-Forwarded-For"),
         get_settings().trusted_proxies,
     )
+    auth.enforce_rate_limit(client, route)
 
 
 def _no_store(response: Response) -> None:
@@ -123,12 +131,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     settings.ensure_dirs()
     db.init_db()
-    # Fail crash-stranded jobs on boot: anything still queued/processing whose
-    # last update predates a full render window plus slack must be dead.
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        seconds=settings.render_timeout_s + 300
-    )
-    db.reconcile_stalled(cutoff.isoformat(timespec="milliseconds"))
+    # Fail crash-stranded jobs on boot, handing their quota reservations back.
+    # The hourly beat sweep runs the same reconciliation, so a box whose API
+    # process never restarts is covered too (worker.reconcile_stalled).
+    reconcile_stalled()
     # Expired sessions are dead weight — clear them on every boot.
     db.purge_expired_sessions()
     yield
@@ -169,7 +175,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
     @router.post("/auth/register", response_model=AuthResponse, status_code=201)
     def register(body: RegisterRequest, request: Request, response: Response) -> AuthResponse:
         _no_store(response)
-        auth.enforce_rate_limit(_client_ip(request), "register")
+        _rate_limit(request, "register")
         email = auth.normalize_email(body.email)
         if not auth.is_valid_email(email):
             raise HTTPException(
@@ -193,7 +199,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
     @router.post("/auth/login", response_model=AuthResponse)
     def login(body: LoginRequest, request: Request, response: Response) -> AuthResponse:
         _no_store(response)
-        auth.enforce_rate_limit(_client_ip(request), "login")
+        _rate_limit(request, "login")
         user = db.get_user_by_email(auth.normalize_email(body.email))
         # One generic 401 for unknown email and wrong password alike, and
         # scrypt runs either way (dummy hash for unknown emails), so neither
@@ -270,7 +276,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
         # Each checkout mints a Stripe Checkout Session (a real API call in
         # stripe mode, and a customer record on first use), so it gets the same
         # per-client window as the credential routes.
-        auth.enforce_rate_limit(_client_ip(request), "checkout")
+        _rate_limit(request, "checkout")
         settings = get_settings()
         gateway = _require_gateway()
         plan = body.plan.strip().lower()

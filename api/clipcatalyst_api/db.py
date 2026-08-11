@@ -37,8 +37,15 @@ _COLUMNS = (
 # `usage_reserved`/`usage_month` are deliberately NOT updatable: the quota a
 # job is holding changes only through reserve_usage / settle_usage, which move
 # it in the same transaction as the counter it is holding.
+#
+# `status` is NOT here either, and that is the point: a blind
+# `update_job(status=...)` can overwrite a row somebody else already moved to a
+# terminal state. That is exactly how a worker used to resurrect a job the
+# reconciler had already failed AND REFUNDED — flipping it back to `done` and
+# handing over clips against a reservation that no longer existed. Every status
+# write therefore goes through transition_status / finalize_job, which name the
+# status they expect to be replacing and report whether they actually won.
 _UPDATABLE = {
-    "status",
     "stage",
     "progress",
     "detail",
@@ -72,6 +79,13 @@ _USER_UPDATABLE = {
     "plan_status",
     "current_period_end",
 }
+
+# The non-terminal statuses a job passes through once it has been started: the
+# only ones a worker may claim, and the only ones the stall reconciler may fail.
+# `done` and `failed` are terminal — nothing moves a job out of them.
+LIVE_STATUSES = ("queued", "processing")
+
+_INTERRUPTED_ERROR = "Processing was interrupted — please try again."
 
 _SCHEMA_STATEMENTS = (
     """
@@ -227,12 +241,18 @@ def get_job(job_id: str) -> dict | None:
 
 
 def update_job(job_id: str, **fields: object) -> None:
-    """Update whitelisted columns; always bumps updated_at."""
+    """Update whitelisted columns; always bumps updated_at.
+
+    Progress bookkeeping only — `status` is not writable here (see _UPDATABLE).
+    """
     if not fields:
         return
-    unknown = set(fields) - _UPDATABLE
-    if unknown:
-        raise ValueError(f"update_job: unknown fields {sorted(unknown)!r}")
+    if "status" in fields:
+        raise ValueError(
+            "update_job: status is not updatable — move it with transition_status"
+            " or finalize_job, which name the status they expect to replace"
+        )
+    _check_fields("update_job", fields)
     assignments = ", ".join(f"{name} = ?" for name in fields)
     values = list(fields.values())
     with contextlib.closing(_connect()) as conn:
@@ -242,27 +262,72 @@ def update_job(job_id: str, **fields: object) -> None:
         )
 
 
+def encode_clips(clips: list[dict]) -> str:
+    """The `clips_json` column value for `clips`.
+
+    Exposed so a caller that must publish the clips in the SAME statement as
+    the terminal status (finalize_job) encodes them exactly like set_clips.
+    """
+    return json.dumps(clips, ensure_ascii=False)
+
+
 def set_clips(job_id: str, clips: list[dict]) -> None:
-    update_job(job_id, clips_json=json.dumps(clips, ensure_ascii=False))
+    update_job(job_id, clips_json=encode_clips(clips))
 
 
-def transition_status(job_id: str, *, expect: str, to: str, **fields: object) -> bool:
+def _expected(expect: str | tuple[str, ...]) -> tuple[str, ...]:
+    return (expect,) if isinstance(expect, str) else tuple(expect)
+
+
+def _check_fields(caller: str, fields: dict[str, object]) -> None:
+    unknown = set(fields) - _UPDATABLE
+    if unknown:
+        raise ValueError(f"{caller}: unknown fields {sorted(unknown)!r}")
+
+
+def _transition_locked(
+    conn: sqlite3.Connection,
+    job_id: str,
+    expected: tuple[str, ...],
+    to: str,
+    fields: dict[str, object],
+    stale_before: str | None,
+) -> bool:
+    """The compare-and-swap every status write is built on. True = we won.
+
+    The WHERE clause carries the caller's whole precondition — the statuses it
+    expects, and optionally the staleness that made the row a candidate — so
+    SQLite, not the caller's earlier read, decides who moves the row.
+    """
+    extra = "".join(f", {name} = ?" for name in fields)
+    placeholders = ", ".join("?" for _ in expected)
+    sql = (
+        f"UPDATE jobs SET status = ?{extra}, updated_at = ?"
+        f" WHERE id = ? AND status IN ({placeholders})"
+    )
+    params: list[object] = [to, *fields.values(), _now(), job_id, *expected]
+    if stale_before is not None:
+        sql += " AND updated_at < ?"
+        params.append(stale_before)
+    return conn.execute(sql, params).rowcount == 1
+
+
+def transition_status(
+    job_id: str, *, expect: str | tuple[str, ...], to: str, **fields: object
+) -> bool:
     """Atomically move a job from `expect` to `to`, guarding races.
 
     Returns True only if this call performed the transition (the row was in
     `expect`). Concurrent duplicate callers get False and must not proceed.
+    `expect` may name several acceptable current statuses.
+
+    A transition that must ALSO settle the job's quota reservation — i.e. any
+    move to a terminal status — belongs in finalize_job, which does both in one
+    transaction instead of leaving a window between them.
     """
-    unknown = set(fields) - _UPDATABLE
-    if unknown:
-        raise ValueError(f"transition_status: unknown fields {sorted(unknown)!r}")
-    extra = "".join(f", {name} = ?" for name in fields)
+    _check_fields("transition_status", fields)
     with contextlib.closing(_connect()) as conn:
-        cur = conn.execute(
-            f"UPDATE jobs SET status = ?{extra}, updated_at = ?"
-            " WHERE id = ? AND status = ?",
-            (to, *fields.values(), _now(), job_id, expect),
-        )
-        return cur.rowcount == 1
+        return _transition_locked(conn, job_id, _expected(expect), to, fields, None)
 
 
 def list_jobs_older_than(cutoff_iso: str) -> list[dict]:
@@ -279,15 +344,24 @@ def list_jobs_older_than(cutoff_iso: str) -> list[dict]:
 def reconcile_stalled(processing_cutoff_iso: str) -> int:
     """Fail jobs stuck in processing/queued past a cutoff (crash recovery).
 
-    Returns the number of rows failed. Called on API startup so a worker that
-    died mid-job never strands a row in a non-terminal state forever — and,
-    with it, the monthly quota that job reserved at /start. A process that
-    died rendered nothing the owner can use, so the reservation goes back
-    here exactly as it would on an ordinary failure.
+    Returns the number of rows failed. Called on API startup AND from the
+    hourly beat sweep (worker.reconcile_stalled), so a worker that died mid-job
+    never strands a row in a non-terminal state forever — and, with it, the
+    monthly quota that job reserved at /start. A process that died rendered
+    nothing the owner can use, so the reservation goes back here exactly as it
+    would on an ordinary failure.
+
+    The SELECT below only nominates candidates; the authority is the
+    compare-and-swap inside finalize_job, which re-checks BOTH halves of what
+    made a row stalled — still non-terminal, still untouched since the cutoff —
+    and settles in the same transaction as the status write. So a job whose
+    worker is alive (a progress write moves updated_at) or which has just
+    finished (a terminal status) is left alone rather than failed and refunded
+    out from under it, and the refund can never happen without the failure.
     """
     with contextlib.closing(_connect()) as conn:
         _ensure_schema(conn)
-        stalled = [
+        candidates = [
             row["id"]
             for row in conn.execute(
                 "SELECT id FROM jobs"
@@ -295,19 +369,17 @@ def reconcile_stalled(processing_cutoff_iso: str) -> int:
                 (processing_cutoff_iso,),
             )
         ]
-        cur = conn.execute(
-            "UPDATE jobs SET status = 'failed',"
-            " error = 'Processing was interrupted — please try again.',"
-            " updated_at = ?"
-            " WHERE status IN ('queued', 'processing') AND updated_at < ?",
-            (_now(), processing_cutoff_iso),
+    return sum(
+        finalize_job(
+            job_id,
+            expect=LIVE_STATUSES,
+            to="failed",
+            rendered=0,
+            stale_before=processing_cutoff_iso,
+            error=_INTERRUPTED_ERROR,
         )
-        failed = cur.rowcount
-    # Settlement is once-only, so a job that finished between the two reads
-    # keeps the bill its own worker settled.
-    for job_id in stalled:
-        settle_usage(job_id, 0)
-    return failed
+        for job_id in candidates
+    )
 
 
 def delete_job(job_id: str) -> None:
@@ -542,6 +614,27 @@ def reserve_usage(
     return applied
 
 
+def _settle_locked(conn: sqlite3.Connection, job_id: str, rendered: int) -> int:
+    """Settle inside an already-open transaction. See settle_usage."""
+    row = conn.execute(
+        "SELECT user_id, usage_reserved, usage_month FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
+    delta = 0
+    reserved = 0 if row is None else int(row["usage_reserved"] or 0)
+    if reserved and row["user_id"]:
+        delta = int(rendered) - reserved
+        conn.execute(
+            "UPDATE jobs SET usage_reserved = 0, updated_at = ? WHERE id = ?",
+            (_now(), job_id),
+        )
+        if delta:
+            conn.execute(
+                _USAGE_DELTA_SQL, (row["user_id"], row["usage_month"], delta, delta)
+            )
+    return delta
+
+
 def settle_usage(job_id: str, rendered: int) -> int:
     """Settle a job's reservation against what it really rendered, ONCE.
 
@@ -560,25 +653,54 @@ def settle_usage(job_id: str, rendered: int) -> int:
         _ensure_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            row = conn.execute(
-                "SELECT user_id, usage_reserved, usage_month FROM jobs WHERE id = ?",
-                (job_id,),
-            ).fetchone()
-            delta = 0
-            reserved = 0 if row is None else int(row["usage_reserved"] or 0)
-            if reserved and row["user_id"]:
-                delta = int(rendered) - reserved
-                conn.execute(
-                    "UPDATE jobs SET usage_reserved = 0, updated_at = ? WHERE id = ?",
-                    (_now(), job_id),
-                )
-                if delta:
-                    conn.execute(
-                        _USAGE_DELTA_SQL,
-                        (row["user_id"], row["usage_month"], delta, delta),
-                    )
+            delta = _settle_locked(conn, job_id, rendered)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
     return delta
+
+
+def finalize_job(
+    job_id: str,
+    *,
+    expect: str | tuple[str, ...],
+    to: str,
+    rendered: int,
+    stale_before: str | None = None,
+    **fields: object,
+) -> bool:
+    """Move a job to a TERMINAL status and settle its reservation, together.
+
+    One BEGIN IMMEDIATE covers both halves, so the pair is indivisible: the
+    caller that wins the status guard is the one — and the only one — that
+    settles. Returns True if this call moved the row; False means somebody else
+    already finished the job, and the caller owns nothing: not the quota, not
+    the right to publish output, not the row.
+
+    That is what makes settle-exactly-once structural rather than a matter of
+    who happened to write first. The two racers are a worker completing a job
+    and the stall reconciler failing it, and BOTH used to settle: whichever
+    settled first cleared the token, and the loser silently no-op'd — so a
+    reconciled job could be flipped back to `done` and delivered for free, and
+    a job completing under the reaper's nose could be refunded after billing.
+    Now the loser knows it lost.
+
+    `rendered` is what the owner actually got (0 releases the whole
+    reservation); `stale_before` adds "and the row has not been touched since"
+    to the guard, which is how reconciliation avoids failing a live worker.
+    """
+    _check_fields("finalize_job", fields)
+    expected = _expected(expect)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            won = _transition_locked(conn, job_id, expected, to, fields, stale_before)
+            if won:
+                _settle_locked(conn, job_id, rendered)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return won

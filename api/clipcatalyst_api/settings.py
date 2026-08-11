@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -56,6 +57,10 @@ class Settings:
     face_tracking: str = "on"  # "on" | "off" — reframe on the speaker
     diarization: str = "on"  # "on" | "off" — color captions per speaker
     session_ttl_days: int = 30  # account sessions expire this many days out
+    # What the credential rate limiter does when it cannot reach Redis:
+    # "off" (the default) refuses the attempt, "on" lets it through. See
+    # auth.rate_limit_fails_open for why closed is the shipped choice.
+    rate_limit_fail_open: str = "off"  # "on" | "off"
     mailer: str = "none"  # "none" | "console" | "resend" — account email
     resend_api_key: str = ""  # only for CC_MAILER=resend
     billing: str = "off"  # "stripe" | "fake" | "off" — plan upgrades
@@ -100,6 +105,25 @@ class Settings:
                 by_price.setdefault(price_id, []).append(name)
         return {price: names for price, names in by_price.items() if len(names) > 1}
 
+    def wide_open_proxies(self) -> list[str]:
+        """CC_TRUSTED_PROXIES entries that trust the ENTIRE address space.
+
+        A zero-length prefix — ``0.0.0.0/0``, ``::/0``, or any spelling of
+        them — matches every possible peer, which is the one value that turns
+        the trusted-proxy rule inside out (see validate). Entries that are not
+        addresses at all are ignored here exactly as ``auth._trusted_networks``
+        ignores them: they trust nobody, so they are nobody's problem.
+        """
+        wide: list[str] = []
+        for entry in self.trusted_proxies:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                continue
+            if network.prefixlen == 0:
+                wide.append(entry)
+        return wide
+
     def validate(self) -> None:
         """Refuse to boot on a configuration that cannot enforce what it sells.
 
@@ -108,6 +132,18 @@ class Settings:
         wrong plan) in production. Everything checked here is a deployment
         state, never client input.
         """
+        for entry in self.wide_open_proxies():
+            raise RuntimeError(
+                f"CC_TRUSTED_PROXIES contains {entry!r}, which trusts EVERY "
+                "address. The whole point of that list is telling a real "
+                "reverse proxy apart from a stranger: with everyone trusted, "
+                "any direct client speaks for itself and picks its own "
+                "rate-limit bucket by rotating X-Forwarded-For per attempt, so "
+                "the login limiter is not weakened — it is gone, and silently. "
+                "Name the proxy's actual address or CIDR block (e.g. "
+                "172.18.0.2 or 10.0.0.0/24), or leave CC_TRUSTED_PROXIES empty "
+                "to trust nobody. See DEPLOY.md §7.2."
+            )
         if self.billing == "off":
             return  # the dev default: no revenue to gate, no price map to build
         if not self.api_token:
@@ -168,6 +204,7 @@ def get_settings() -> Settings:
         face_tracking=os.environ.get("CC_FACE_TRACKING", "on"),
         diarization=os.environ.get("CC_DIARIZATION", "on"),
         session_ttl_days=int(os.environ.get("CC_SESSION_TTL_DAYS", "30")),
+        rate_limit_fail_open=os.environ.get("CC_RATE_LIMIT_FAIL_OPEN", "off"),
         mailer=os.environ.get("CC_MAILER", "none"),
         resend_api_key=os.environ.get("CC_RESEND_API_KEY", ""),
         billing=os.environ.get("CC_BILLING", "off"),

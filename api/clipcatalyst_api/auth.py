@@ -14,6 +14,7 @@ import ipaddress
 import logging
 import re
 import secrets
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from typing import Sequence
 from fastapi import Header, HTTPException
 
 from . import db
-from .settings import get_settings
+from .settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -259,14 +260,84 @@ def optional_actor(
 # Rate limiting for the credential endpoints.
 # --------------------------------------------------------------------------- #
 
-# Fixed-window counter per (client ip, route). Honest limitation: this is
-# in-process memory — counters reset on every restart and are not shared
-# across workers or replicas, so a multi-process deploy multiplies the
-# effective limit by its process count. Good enough to blunt online
-# credential guessing on the current single-box deploy; move the counters to
-# a shared store (redis) if that changes.
+# A fixed-window counter per (client, route): RATE_LIMIT_PER_MINUTE attempts a
+# minute, then 429 until the minute turns over.
+#
+# The counters live in REDIS — the same instance Celery already brokers on, so
+# production gains no dependency it did not already have — because every
+# property this limiter needs is a property of the STORE, not of code defending
+# a dict:
+#
+#   * atomic: INCR is one operation, so two concurrent attempts cannot lose a
+#     count or tear a read-modify-write, whatever thread they land on;
+#   * self-expiring: the key names its own window and is given a TTL, so a dead
+#     counter is removed by Redis and there is nothing to sweep — a sweep of a
+#     shared table is what the previous version raced on;
+#   * bounded by the store: the key space costs memory Redis manages and evicts
+#     by its own policy, not memory this process rations with a ceiling on
+#     attacker-supplied strings. That ceiling was itself the bug: past it the
+#     limiter changed MODE, and an attacker who can flip the limiter into a
+#     different mode owns the limiter.
+#
+# Without Redis — dev, CC_QUEUE=eager, the test suite — the counters fall back
+# to a fixed-size in-process table (see _count_in_memory), which is bounded by
+# construction rather than by a cap anybody has to enforce.
 RATE_LIMIT_PER_MINUTE = 10
-_rate_windows: dict[tuple[str, str], tuple[int, int]] = {}
+
+_RATE_LIMITED = "Too many attempts — please wait a minute and try again."
+
+# Redis key layout: cc:rl:<route>:<minute>:<client>. The window is IN the key,
+# so a new minute is a new key rather than a counter somebody has to reset.
+_KEY_PREFIX = "cc:rl:"
+
+# How long a counter lives once created. Its window is over one minute after
+# it was first written, by definition, so a one-window TTL is all Redis needs
+# to reclaim it.
+_WINDOW_TTL_S = 60
+
+# Short and explicit: the credential routes are `def`, so FastAPI runs them in
+# the anyio threadpool, and a Redis that hangs instead of refusing would
+# otherwise pin one worker per attempt for as long as the kernel would wait.
+_REDIS_TIMEOUT_S = 1.0
+
+# INCR, and EXPIRE only on the call that CREATED the key. Redis runs a script
+# atomically, so this cannot interleave with another caller's INCR and cannot
+# leave the key immortal by dying between the two commands.
+_INCR_WINDOW_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+_OFF_VALUES = {"", "0", "off", "false", "no", "none", "disabled"}
+
+# The in-process fallback. A FIXED array of (window, count) slots addressed by
+# a hash of the key — not a dict with an entry per client — so there is nothing
+# here an attacker can make grow: the table is exactly this size after one
+# request and after ten million, needs no eviction, and needs no sweep (a slot
+# whose stored window is not the current one has simply expired, which is an
+# O(1) check on the one slot being touched). Two keys that land in the same
+# slot SHARE a counter, and sharing can only ever refuse EARLIER — never admit
+# more, and never reset anyone's count — so the error direction is toward the
+# strict side. The slot is chosen by blake2b rather than hash() so it is the
+# same on every run: a collision is then a fact of the code, findable and
+# fixable, instead of a coin flip that shows up once in a thousand boots.
+#
+# Stated plainly, because it is the price of that determinism: someone who can
+# choose their own key can compute which forged address shares a slot with a
+# victim and push that slot over the ceiling. Reaching it needs BOTH a trusted
+# proxy (otherwise client_ip returns the socket peer, which nobody chooses) and
+# this fallback in use — i.e. CC_QUEUE=eager, which is dev, not a deployment.
+# Production counts in Redis, where every key stands alone.
+_MEMORY_SLOTS = 1 << 16
+_memory_lock = threading.Lock()
+_memory_windows: list[tuple[int, int]] = [(-1, 0)] * _MEMORY_SLOTS
+
+# The last minute a Redis outage was logged. Logging hygiene only — an outage
+# is every single request, and a warning per login attempt is its own incident.
+_logged_outage_minute = -1
 
 
 _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -305,7 +376,7 @@ def client_ip(peer: str, forwarded_for: str | None, trusted_proxies: Sequence[st
     the header with the real peer (Caddy: `header_up X-Forwarded-For
     {remote_host}`) — a proxy that appends leaves the leftmost entry
     client-written. Anything that isn't an ip address falls back to the peer,
-    so a malformed header cannot mint unbounded window keys either.
+    so a malformed header is never a counter of its own.
     """
     if not forwarded_for or not trusted_proxies:
         return peer
@@ -327,22 +398,140 @@ def _current_minute() -> int:
     return int(time.time() // 60)
 
 
-def enforce_rate_limit(client_ip: str, route: str) -> None:
-    """Count one attempt; 429 beyond RATE_LIMIT_PER_MINUTE in the window."""
-    minute = _current_minute()
-    key = (client_ip, route)
-    window, count = _rate_windows.get(key, (minute, 0))
-    if window != minute:
-        window, count = minute, 0
-    count += 1
-    _rate_windows[key] = (window, count)
-    if count > RATE_LIMIT_PER_MINUTE:
-        raise HTTPException(
-            status_code=429,
-            detail="Too many attempts — please wait a minute and try again.",
+def rate_limit_fails_open(settings: Settings) -> bool:
+    """Whether an unreachable Redis lets credential attempts through.
+
+    The default is NO — this limiter fails CLOSED — and that is a deliberate
+    trade, not an oversight:
+
+    * Failing open hands an attacker the exact thing the limiter exists to
+      deny, unmetered online password guessing, and hands it over at the one
+      moment nobody is reading dashboards for anything but the outage. Worse,
+      it is reachable: whoever can knock Redis over can also un-limit login.
+    * Closed is cheap here specifically because Redis is the Celery broker.
+      A box that cannot reach it cannot queue a render either, so refusing
+      credential attempts during the outage does not turn a working product
+      into a broken one — it declines to widen an outage that already exists.
+
+    The cost is real and worth stating plainly: a momentary blip turns a
+    legitimate sign-in into a 429 that asks the user to wait a minute. An
+    operator who would rather serve logins than refuse them sets
+    ``CC_RATE_LIMIT_FAIL_OPEN=on`` and takes the other side of that trade
+    knowingly, in writing, in their own environment.
+    """
+    value = getattr(settings, "rate_limit_fail_open", "off")
+    return str(value).strip().lower() not in _OFF_VALUES
+
+
+def _memory_slot(client: str, route: str) -> int:
+    """The fixed table slot a key is counted in (stable across processes)."""
+    digest = hashlib.blake2b(
+        f"{route}\x00{client}".encode("utf-8"), digest_size=8
+    ).digest()
+    return int.from_bytes(digest, "big") % _MEMORY_SLOTS
+
+
+def _count_in_memory(client: str, route: str, minute: int) -> int:
+    """Count one attempt in the in-process table; the running count.
+
+    One lock, held across the whole read-modify-write, is the entire
+    concurrency story: there is no second structure to keep in step and
+    nothing that iterates, so there is nothing for a concurrent caller to
+    tear. A slot from an older minute is simply overwritten, which is how a
+    window ends here — no sweep, no eviction, no cap.
+    """
+    slot = _memory_slot(client, route)
+    with _memory_lock:
+        window, count = _memory_windows[slot]
+        count = count + 1 if window == minute else 1
+        _memory_windows[slot] = (minute, count)
+    return count
+
+
+@lru_cache(maxsize=1)
+def _redis_client(url: str):  # noqa: ANN202 - redis.Redis
+    """The shared Redis handle for `url`; redis-py pools connections itself."""
+    import redis
+
+    return redis.Redis.from_url(
+        url,
+        socket_connect_timeout=_REDIS_TIMEOUT_S,
+        socket_timeout=_REDIS_TIMEOUT_S,
+    )
+
+
+def _log_redis_outage(minute: int, error: BaseException, *, fail_open: bool) -> None:
+    """Warn once a minute that the limiter cannot reach its counters."""
+    global _logged_outage_minute
+    with _memory_lock:
+        if _logged_outage_minute == minute:
+            return
+        _logged_outage_minute = minute
+    logger.warning(
+        "rate limiter could not reach redis (%s: %s) — credential attempts are "
+        "being %s while this lasts (CC_RATE_LIMIT_FAIL_OPEN)",
+        type(error).__name__,
+        error,
+        "allowed through" if fail_open else "refused",
+    )
+
+
+def _count_attempt(client: str, route: str, minute: int) -> int | None:
+    """Count one attempt; the running count, or None if Redis was unreachable.
+
+    CC_QUEUE=redis is what "this box has the Redis it needs" means here: it
+    names the very instance Celery brokers on. CC_QUEUE=eager — dev and the
+    test suite — has no Redis to reach, so it counts in process.
+    """
+    settings = get_settings()
+    if settings.queue != "redis":
+        return _count_in_memory(client, route, minute)
+    key = f"{_KEY_PREFIX}{route}:{minute}:{client}"
+    try:
+        return int(
+            _redis_client(settings.redis_url).eval(
+                _INCR_WINDOW_LUA, 1, key, _WINDOW_TTL_S
+            )
         )
+    except Exception as error:  # noqa: BLE001 - any failure to count is an outage
+        # Deliberately broad. A refused connection, a timeout, a redis module
+        # that will not import and a reply this code cannot read are one event
+        # to the caller — the attempt was NOT counted — and the policy in
+        # enforce_rate_limit is what decides what that means. Narrowing this to
+        # redis.RedisError would let some other failure become a 500 on an
+        # unauthenticated route, which is a worse answer than either policy.
+        _log_redis_outage(minute, error, fail_open=rate_limit_fails_open(settings))
+        return None
+
+
+def enforce_rate_limit(client: str, route: str) -> None:
+    """Count one attempt; 429 beyond RATE_LIMIT_PER_MINUTE in the window.
+
+    ``client`` is who the attempt is attributed to — see ``client_ip``, the one
+    place a forwarded header is ever believed. Nothing else about a request can
+    change which counter is touched, and no amount of traffic can change the
+    ceiling any other client is held to.
+    """
+    minute = _current_minute()
+    count = _count_attempt(client, route, minute)
+    if count is None:
+        # Redis is unreachable; fail closed unless the operator said otherwise.
+        if rate_limit_fails_open(get_settings()):
+            return
+        raise HTTPException(status_code=429, detail=_RATE_LIMITED)
+    if count > RATE_LIMIT_PER_MINUTE:
+        raise HTTPException(status_code=429, detail=_RATE_LIMITED)
 
 
 def reset_rate_limits() -> None:
-    """Forget all rate-limit windows (test isolation hook)."""
-    _rate_windows.clear()
+    """Forget the in-process counters and drop the Redis handle (test hook).
+
+    Only the in-process table is cleared: Redis counters name their window and
+    expire on their own, and a test that wants to look at them owns the client
+    it injected.
+    """
+    global _logged_outage_minute
+    with _memory_lock:
+        _memory_windows[:] = [(-1, 0)] * _MEMORY_SLOTS
+        _logged_outage_minute = -1
+    _redis_client.cache_clear()

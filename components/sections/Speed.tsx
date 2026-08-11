@@ -7,23 +7,30 @@ import {
   SectionHeading,
 } from "@/components/ui";
 
+/**
+ * The browser render floor, not a benchmark.
+ *
+ * lib/studio/render.ts captures the clip through MediaRecorder while the video
+ * plays, so writing a clip can never be faster than the clip itself. That
+ * makes these numbers derivable from the code rather than measured — which is
+ * exactly why they are stated as floors ("at least"), never as medians.
+ */
 const rows = [
   {
-    name: "ClipCatalyst",
-    time: "90 sec",
-    self: true,
-    // 90s of 1080s ≈ 8.3% — min-w keeps the bar visibly non-trivial
-    width: "w-[8.33%] min-w-[4.75rem]",
-  },
-  {
-    name: "OpusClip",
-    time: "~12 min",
+    name: "1 clip · 30s",
+    time: "≥ 30s",
     self: false,
-    width: "w-[66.7%]",
+    width: "w-[16.7%] min-w-[4.75rem]",
   },
   {
-    name: "Klap",
-    time: "~18 min",
+    name: "2 clips · 30s · default",
+    time: "≥ 60s",
+    self: true,
+    width: "w-[33.3%]",
+  },
+  {
+    name: "3 clips · 60s · max",
+    time: "≥ 180s",
     self: false,
     width: "w-full",
   },
@@ -31,8 +38,8 @@ const rows = [
 
 const hows = [
   {
-    title: "Optimized GPU pipelines",
-    copy: "Decode, reframe, and render on tuned GPU workers — zero queue time, zero idle cycles.",
+    title: "Nothing to upload",
+    copy: "Transcription, scoring, and rendering all happen in this tab. There is no upload bar, and no server queue to sit in behind someone else's job.",
     icon: (
       <svg
         width="18"
@@ -50,8 +57,8 @@ const hows = [
     ),
   },
   {
-    title: "Parallel processing",
-    copy: "Every clip renders simultaneously. Ten clips finish in roughly the time of one.",
+    title: "Render tracks clip length",
+    copy: "Clips are captured as they play, so render time follows the clips you asked for — not the length of the video you fed in.",
     icon: (
       <svg
         width="18"
@@ -70,8 +77,8 @@ const hows = [
     ),
   },
   {
-    title: "Intelligent caching",
-    copy: "Faces, cuts, and caption patterns are cached — repeat runs come back even faster.",
+    title: "The cloud number is a target",
+    copy: "The GPU pipeline is built and tested, and designed for roughly 2–3 minutes on a T4. It has not been run on real hardware, so we quote no measured time.",
     icon: (
       <svg
         width="18"
@@ -101,22 +108,22 @@ export default function Speed() {
       />
       <Container className="relative">
         <SectionHeading
-          eyebrow="The 90-Second Guarantee"
+          eyebrow="Speed, honestly"
           title={
             <>
-              Done in <GradientText>90 seconds</GradientText>. Not 20 minutes.
+              No upload. No queue. <GradientText>No waiting your turn</GradientText>.
             </>
           }
-          lede="Median time from upload to finished clip at launch: under 90 seconds. The competition is still drawing a progress bar."
+          lede="Studio renders on your machine, so nothing sits behind another customer's job. The floor is physics, not congestion: clips are captured in real time, so a 30-second clip takes at least 30 seconds to write — plus transcription up front."
         />
 
         {/* Comparison chart */}
         <Card className="mx-auto mt-14 max-w-4xl p-6 sm:p-10 md:mt-16">
           <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
             <p className="font-mono text-xs uppercase tracking-[0.15em] text-zinc-500">
-              Time to finished clips · 60-min podcast
+              Render floor · browser · real-time capture
             </p>
-            <Badge tone="signal">Up to 12× faster</Badge>
+            <Badge tone="signal">Runs on your machine</Badge>
           </div>
 
           <div className="flex flex-col gap-6 sm:gap-5">
@@ -165,14 +172,15 @@ export default function Speed() {
           >
             <div className="col-start-2 flex justify-between border-t border-line pt-2 font-mono text-[10px] text-zinc-600">
               <span>0</span>
-              <span>6 min</span>
-              <span>12 min</span>
-              <span>18 min</span>
+              <span>60s</span>
+              <span>120s</span>
+              <span>180s</span>
             </div>
           </div>
 
           <p className="mt-6 font-mono text-xs text-zinc-400 sm:mt-4">
-            Target median · cloud pipeline · 1080p source · 10 clips per batch
+            Render step only · transcription and scoring run first and scale
+            with source length
           </p>
         </Card>
 

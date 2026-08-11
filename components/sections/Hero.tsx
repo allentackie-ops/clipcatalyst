@@ -1,10 +1,13 @@
 import { Badge, Button, Container, GradientText, ScoreRing } from "@/components/ui";
 
+// Every number here is a value the shipped browser Studio enforces:
+// unlimited runs (no quota anywhere on the device path), 1080x1920 as the top
+// quality option, the 0-100 display score, and the 20-minute source cap.
 const STATS = [
-  { value: "<90s", label: "median time" },
-  { value: "4K", label: "max export" },
+  { value: "Unlimited", label: "free runs" },
+  { value: "1080p", label: "max export" },
   { value: "0–100", label: "virality score" },
-  { value: "10GB", label: "max upload" },
+  { value: "20 min", label: "max source" },
 ];
 
 const WAVEFORM = [
@@ -51,13 +54,14 @@ export default function Hero() {
             <h1 className="mt-6 font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl lg:leading-[1.05]">
               <span className="block">Studio-quality clips</span>
               <span className="block">
-                in <GradientText>90 seconds</GradientText>.
+                in <GradientText>your browser</GradientText>.
               </span>
             </h1>
 
             <p className="mt-6 max-w-xl text-base leading-relaxed text-zinc-400 sm:text-lg">
-              Paste a link. The AI finds your viral moments, reframes them to
-              9:16, captions every word, and scores each clip 0&ndash;100. Stop
+              Drop in a video. Studio transcribes it on-device, finds the
+              moments worth cutting, reframes to 9:16 with face tracking,
+              captions every word, and scores each clip 0&ndash;100. Stop
               editing &mdash; start posting.
             </p>
 
@@ -73,7 +77,8 @@ export default function Hero() {
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-500">
               Clipping runs in your browser &mdash; nothing to install, nothing
               uploaded, and your video never leaves your device. Desktop
-              Chrome, Edge, or Firefox.
+              Chrome, Edge, or Firefox; sources up to 20 minutes and 1.4&nbsp;GB.
+              Clips are watermarked.
             </p>
 
             {/* Stat strip */}

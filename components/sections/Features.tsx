@@ -137,7 +137,7 @@ const icons = {
 } as const;
 
 /* ---------------------------------------------------------------- */
-/* Content — 9 core + 8 pro (from DESIGN.md)                        */
+/* Content — what the two engines actually do                       */
 /* ---------------------------------------------------------------- */
 
 type Feature = {
@@ -146,94 +146,95 @@ type Feature = {
   icon: ReactNode;
 };
 
+/** Shipped and free: every one of these runs in the browser, no account. */
 const CORE_FEATURES: Feature[] = [
   {
     name: "Smart highlighting",
-    desc: "Golden-nugget detection surfaces the moments worth clipping.",
+    desc: "Scores every candidate window on hook, density, energy and completeness, then picks the best without overlaps.",
     icon: icons.sparkle,
   },
   {
-    name: "Auto-captioning",
-    desc: "10+ animated templates with keyword highlights, emoji, and speaker colors.",
+    name: "Word-level captions",
+    desc: "Every word timed and burned in, with the spoken word highlighted as it lands.",
     icon: icons.captions,
   },
   {
     name: "Vertical reframing",
-    desc: "Auto 9:16 crop with face tracking that never loses the speaker.",
+    desc: "Auto 9:16 crop with face tracking that keeps the speaker in frame.",
     icon: icons.reframe,
   },
   {
-    name: "Brand kit",
-    desc: "Your logo, fonts, and colors applied to every clip automatically.",
-    icon: icons.palette,
-  },
-  {
-    name: "Built-in editor",
-    desc: "Trim, tweak, and polish without ever leaving the browser.",
-    icon: icons.sliders,
-  },
-  {
-    name: "One-click publish",
-    desc: "Push straight to TikTok, Shorts, and Reels the moment a clip is done.",
-    icon: icons.send,
+    name: "Multi-speaker detection",
+    desc: "Diarization separates the voices and gives each speaker their own caption color.",
+    icon: icons.mic,
   },
   {
     name: "Virality score",
-    desc: "Every clip rated 0–100, with tips to push it higher.",
+    desc: "Every clip rated 0–100, with the reason it scored that way and one concrete fix.",
     icon: icons.gauge,
   },
   {
-    name: "Bulk processing",
-    desc: "Feed it whole podcasts and VODs; get a full clip library back.",
-    icon: icons.layers,
-  },
-  {
-    name: "Multi-speaker detection",
-    desc: "Knows who is talking — and frames and captions accordingly.",
-    icon: icons.mic,
-  },
-];
-
-const PRO_FEATURES: Feature[] = [
-  {
-    name: "AI hook generator",
-    desc: "Five scroll-stopping hooks per clip, strongest one flagged.",
+    name: "Hook suggestions",
+    desc: "Up to five opening lines per clip, strongest first — swap between them by chat.",
     icon: icons.hook,
   },
   {
-    name: "Auto B-roll",
-    desc: "Relevant stock footage layered in exactly where it lands.",
-    icon: icons.film,
-  },
-  {
     name: "Chat-based editing",
-    desc: "Type “make clip 2 more energetic” — the AI does the rest.",
+    desc: "“Remove the pause at 0:14.” “Make it more energetic.” “Trim the first 2 seconds.” Undo with a word.",
     icon: icons.chat,
   },
   {
-    name: "Team workspace",
-    desc: "Approvals and shared brand kits keep every clip on-message.",
-    icon: icons.team,
+    name: "Runs on your machine",
+    desc: "Whisper, scoring, and rendering all happen in the tab. Your video never leaves the device.",
+    icon: icons.terminal,
   },
   {
-    name: "XML export",
-    desc: "Hand finished timelines to Premiere, Resolve, or Final Cut.",
-    icon: icons.code,
+    name: "Download & share",
+    desc: "Save the MP4, or hand it straight to your phone's native share sheet.",
+    icon: icons.send,
+  },
+];
+
+/**
+ * The cloud pipeline: written and tested, but never run on GPU hardware and
+ * switched off by default. Listed as what it is built to add — not as
+ * something a visitor can use today.
+ */
+const CLOUD_FEATURES: Feature[] = [
+  {
+    name: "Bigger sources",
+    desc: "Uploads up to 2 GB a file, so hour-long episodes stop being the problem.",
+    icon: icons.film,
   },
   {
-    name: "A/B testing",
-    desc: "Three versions per clip, so the data picks the winner.",
-    icon: icons.split,
+    name: "GPU transcription",
+    desc: "distil-large-v3 on a GPU worker, instead of the tiny model a browser tab can afford.",
+    icon: icons.sliders,
   },
   {
-    name: "Analytics dashboard",
-    desc: "See which clips convert — then double down on what works.",
+    name: "Watermark-free renders",
+    desc: "Paid plans drop the ClipCatalyst mark from every export.",
+    icon: icons.palette,
+  },
+  {
+    name: "Higher export ceiling",
+    desc: "720p on the free plan, 1080p on Starter, up to 2160×3840 on Pro and Enterprise.",
+    icon: icons.layers,
+  },
+  {
+    name: "Monthly allowances",
+    desc: "3 clips free, 30 on Starter, 100 on Pro, uncapped on Enterprise.",
     icon: icons.bars,
   },
   {
-    name: "API access",
-    desc: "Wire clipping into your own pipeline, end to end.",
-    icon: icons.terminal,
+    name: "Owned job history",
+    desc: "Every render is a job on your account — status you can poll, results you can re-fetch.",
+    icon: icons.code,
+  },
+  {
+    name: "Per-clip failure isolation",
+    desc: "One clip failing to render never takes the rest of the batch down with it.",
+    icon: icons.split,
   },
 ];
 
@@ -317,16 +318,16 @@ export default function Features() {
       />
       <Container className="relative">
         <SectionHeading
-          eyebrow="Everything in the box"
-          title="The whole clipping stack, built in"
-          lede="Nine core features in every workflow, eight Pro tools your current editor can't match."
+          eyebrow="What ships"
+          title="The whole clipping stack, in one tab"
+          lede="Nine things the free browser Studio does today — no account, no upload — and seven the cloud pipeline is built to add once it is switched on."
         />
 
         <div className="mt-14 md:mt-16">
           <GroupHeading
-            badge="Core"
+            badge="Free"
             tone="neutral"
-            label="The core stack"
+            label="In your browser, today"
             count={CORE_FEATURES.length}
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Badge, Card } from "@/components/ui";
+import { Badge, Card, Mark } from "@/components/ui";
 import {
   formatBytes,
   formatDuration,
@@ -307,15 +307,9 @@ export default function StudioDropzone({
           aria-disabled={!canGenerate}
           className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-7 py-3.5 text-base font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:brightness-100"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden
-          >
-            <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" />
-          </svg>
+          {/* The mark earns its place here: it draws clips, which is exactly
+              what this button returns. */}
+          <Mark className="h-4 w-4" />
           Find my clips
         </button>
 

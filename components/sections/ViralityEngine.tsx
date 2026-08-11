@@ -256,7 +256,10 @@ export default function ViralityEngine() {
                 className="mt-0.5 shrink-0 text-ember-400"
                 aria-hidden
               >
-                <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" />
+                {/* Advisory, not identity: the tip is worth points, so the
+                    icon is a rising line rather than the brand mark. */}
+                <path d="M3 16.5 9.5 10l4 4L21 6.5" />
+                <path d="M15 6.5h6v6" />
               </svg>
               <p className="text-xs leading-relaxed text-zinc-400">
                 <span className="font-medium text-zinc-200">Tip:</span> lead

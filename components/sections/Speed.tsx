@@ -3,6 +3,7 @@ import {
   Card,
   Container,
   GradientText,
+  Mark,
   SectionHeading,
 } from "@/components/ui";
 
@@ -143,18 +144,9 @@ export default function Speed() {
                     <div
                       className={`flex h-full items-center justify-end rounded-lg bg-gradient-to-r from-brand-500 to-spark-500 pr-2.5 shadow-[0_0_20px_rgba(139,92,246,0.45)] ${row.width}`}
                     >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        aria-hidden
-                      >
-                        <path
-                          d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-                          fill="white"
-                        />
-                      </svg>
+                      {/* Our own bar in a field of competitors — the mark is
+                          the label saying which one is us. */}
+                      <Mark className="h-3 w-3 text-white" />
                     </div>
                   ) : (
                     <div

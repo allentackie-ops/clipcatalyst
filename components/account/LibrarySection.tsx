@@ -22,6 +22,7 @@ import {
   type AccountUser,
   type LibraryClip,
 } from "@/lib/account";
+import { useConnections } from "@/components/publish/ConnectionsProvider";
 import { useAccount } from "./AccountProvider";
 import LibraryClipCard from "./LibraryClipCard";
 
@@ -67,6 +68,7 @@ export default function LibrarySection({
   const [announcement, setAnnouncement] = useState("");
 
   const { refresh } = useAccount();
+  const { connections } = useConnections();
   const deadRef = useRef(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -174,6 +176,18 @@ export default function LibrarySection({
     [deletingId, expired]
   );
 
+  // A platform this build can really post to, that nothing is connected to
+  // yet. Cards carry no Post button in that state — there is nowhere for a
+  // post to go — so the section says where one comes from instead. A link to
+  // the section below, never a button that would fail (PUBLISH.md).
+  const unconnected =
+    connections?.platforms.filter(
+      (platform) =>
+        platform.publishable &&
+        platform.connectable &&
+        !connections.connections.some((c) => c.platform === platform.platform)
+    ) ?? [];
+
   const retention = retentionLine(user.entitlements.retention_days, planLabel);
   const lapsedNote =
     effectivePlan(user) === "free" && user.plan !== "free"
@@ -199,6 +213,19 @@ export default function LibrarySection({
           <p className="mt-1 text-xs leading-relaxed text-zinc-500">
             {retention}
             {lapsedNote}
+          </p>
+        ) : null}
+        {unconnected.length > 0 ? (
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+            {unconnected.map((platform) => platform.label).join(" and ")} can
+            take a clip straight from here —{" "}
+            <a
+              href="#connections-heading"
+              className="rounded text-brand-300 underline-offset-4 transition-colors hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              connect a channel below
+            </a>
+            .
           </p>
         ) : null}
       </div>

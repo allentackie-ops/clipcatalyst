@@ -87,6 +87,7 @@ export default function ResultsView({
   failedCount,
   onReset,
   renderSaveAction,
+  renderPostAction,
 }: {
   clips: StudioClip[];
   sourceUrl: string;
@@ -103,6 +104,11 @@ export default function ResultsView({
    *  callback rather than an import: uploading needs the account, and this
    *  view is the device pipeline's, which works with no account at all. */
   renderSaveAction?: (clip: FinishedClip, index: number) => ReactNode;
+  /** Builds each card's "Post to YouTube" control (PUBLISH.md Part 4), for the
+   *  same reason and with the same shape. It usually returns nothing: a device
+   *  clip has to be saved to the library before there is anything to post, and
+   *  posting needs a connected channel. */
+  renderPostAction?: (clip: FinishedClip, index: number) => ReactNode;
 }) {
   const [sessions, setSessions] = useState<EditSession[]>(() =>
     clips.map(() => newEditSession())
@@ -301,6 +307,7 @@ export default function ResultsView({
               edited={sessions[i].rendered !== null}
               onEdit={() => openEditor(i)}
               saveAction={renderSaveAction?.(shown, i)}
+              postAction={renderPostAction?.(shown, i)}
             />
           );
         })}

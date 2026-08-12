@@ -4,6 +4,11 @@
 // page, Studio). Fetches on mount when a session token exists; a 401 clears
 // the token (lib/account does that) and settles to signed-out. With
 // NEXT_PUBLIC_CLOUD_API unset it settles immediately — no network at all.
+//
+// It also mounts ConnectionsProvider (PUBLISH.md Part 4) around the same
+// children, so a page that has an account also has its connected channels.
+// The nesting is deliberate: connections only exist for a session, so the
+// thing that knows whether there is one is what decides whether to look.
 
 import {
   createContext,
@@ -15,6 +20,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import ConnectionsProvider from "@/components/publish/ConnectionsProvider";
 import { cloudEnabled } from "@/components/studio/cloud";
 import {
   AccountError,
@@ -100,6 +106,10 @@ export default function AccountProvider({
   );
 
   return (
-    <AccountContext.Provider value={value}>{children}</AccountContext.Provider>
+    <AccountContext.Provider value={value}>
+      <ConnectionsProvider signedIn={user !== null}>
+        {children}
+      </ConnectionsProvider>
+    </AccountContext.Provider>
   );
 }

@@ -1206,6 +1206,51 @@ def test_an_upload_whose_worker_died_is_failed_rather_than_left_spinning(
     assert sandbox.worker.reconcile_stalled_publishes() == 0
 
 
+def test_a_box_with_no_beat_settles_a_stranded_upload_on_its_next_boot(
+    sandbox: SimpleNamespace,
+) -> None:
+    """The other half of the same promise, and the half that needs no beat.
+
+    `celery beat` is optional on a single box (queue_app.beat_schedule says so
+    out loud), and on a box without one the hourly sweep above never runs — so
+    an upload whose worker was killed would read `uploading` with nobody
+    working on it for as long as the row survived, and the sheet polling it
+    would spin for exactly that long. The API's startup hook reconciles these
+    for the same reason it reconciles renders.
+    """
+    from fastapi.testclient import TestClient
+
+    from clipcatalyst_api.main import app
+
+    token, clip = _ready(sandbox)
+    publish_id = "ba" * 16
+    sandbox.db.create_publish_job(
+        publish_id,
+        user_id=_rows(sandbox.db, "users")[0]["id"],
+        clip_id=clip["id"],
+        connection_id=_connection(sandbox)["id"],
+        platform="youtube",
+        title="",
+        description="",
+        privacy="private",
+    )
+    _age_publish(sandbox, publish_id, updated_at="2000-01-01T00:00:00.000+00:00")
+
+    # A restart, and nothing else: no sweep is called by hand here.
+    with TestClient(app):
+        pass
+
+    row = sandbox.db.get_publish_job(publish_id)
+    assert row["status"] == "failed"
+    assert "try posting this clip again" in row["error"]
+    # And the poll a stuck sheet is making now has a terminal answer for it.
+    body = sandbox.client.get(
+        f"/v1/publishes/{publish_id}", headers=_bearer(token)
+    ).json()
+    assert body["status"] == "failed"
+    assert body["error"] == row["error"]
+
+
 def test_a_running_upload_is_never_swept_out_from_under_itself(
     sandbox: SimpleNamespace,
 ) -> None:

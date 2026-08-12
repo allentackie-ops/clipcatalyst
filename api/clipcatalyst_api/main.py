@@ -68,7 +68,12 @@ from .models import (
 from .plans import PLANS, effective_plan
 from .settings import Settings, get_settings
 from .storage import clip_media_type, get_storage
-from .worker import process_job, publish_clip, reconcile_stalled
+from .worker import (
+    process_job,
+    publish_clip,
+    reconcile_stalled,
+    reconcile_stalled_publishes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -836,6 +841,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The hourly beat sweep runs the same reconciliation, so a box whose API
     # process never restarts is covered too (worker.reconcile_stalled).
     reconcile_stalled()
+    # And the same for uploads (PUBLISH.md Part 3), which mirror the job pattern
+    # here as well: a publish whose worker was killed mid-upload reads
+    # `uploading` with nobody working on it, and the sheet polling it spins for
+    # as long as that lasts. Beat sweeps these hourly too — but beat is optional
+    # on a single box (see queue_app.beat_schedule), and a row nobody will ever
+    # settle is the one outcome this must not have.
+    reconcile_stalled_publishes()
     # Expired sessions are dead weight — clear them on every boot.
     db.purge_expired_sessions()
     # So are half-finished authorizations nobody came back for. They already

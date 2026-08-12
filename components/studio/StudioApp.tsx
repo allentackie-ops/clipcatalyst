@@ -17,6 +17,9 @@ import StageChecklist from "./StageChecklist";
 import ClipCard from "./ClipCard";
 import ResultsView from "./ResultsView";
 import SaveToLibraryButton from "./SaveToLibraryButton";
+import PostToYouTube from "@/components/publish/PostToYouTube";
+import { useConnections } from "@/components/publish/ConnectionsProvider";
+import { canPublish, libraryClipsForJob } from "@/lib/account";
 import {
   DEFAULT_SETTINGS,
   formatBytes,
@@ -53,7 +56,10 @@ type CloudRunState =
   | { status: "uploading"; progress: number }
   | { status: "queued" }
   | { status: "processing"; stage: CloudStage; progress: number; detail: string }
-  | { status: "done"; clips: CloudFinishedClip[] }
+  // `jobId` outlives the run because the library rows the worker wrote are
+  // keyed by it — finding them is what lets a cloud clip be posted to a
+  // connected channel from this page (PUBLISH.md Part 4).
+  | { status: "done"; jobId: string; clips: CloudFinishedClip[] }
   | { status: "error"; message: string };
 
 const CLOUD_STAGE_IDS: readonly CloudStage[] = [
@@ -560,6 +566,10 @@ function CloudChecklist({
 export default function StudioApp() {
   const { state, run, reset } = useStudioPipeline();
   const { user, loading: accountLoading } = useAccount();
+  // Connected channels, for the "Post to YouTube" chip on a finished clip
+  // (PUBLISH.md Part 4). Shared with the account page rather than fetched
+  // here, so the two can never disagree about what is connected.
+  const { connections } = useConnections();
 
   // Entitlements are the server's (/v1/me reports the EFFECTIVE plan, so a
   // canceled subscription is already free). Signed out, still loading, or on
@@ -601,6 +611,25 @@ export default function StudioApp() {
     cloudObjectUrlsRef.current = [];
   }, []);
 
+  // A clip can only be POSTED to a channel once it has a library row — that
+  // copy is what the upload reads from (PUBLISH.md Part 3). The two engines
+  // arrive there differently:
+  //
+  //   * a device clip has no row until somebody clicks "Save to library", and
+  //     that click is what hands one back;
+  //   * a cloud clip already has one — the worker wrote it while rendering —
+  //     but a job's clip ids are not the library's, so the rows are looked up
+  //     once, when the run finishes.
+  //
+  // Either way the id is the whole gate: no id, no Post button. A clip this
+  // page cannot name is a clip it will not offer to post.
+  const [savedClipIds, setSavedClipIds] = useState<Record<string, string>>({});
+  const [cloudClipIds, setCloudClipIds] = useState<Record<number, string>>({});
+
+  const rememberSavedClip = useCallback((url: string, clipId: string) => {
+    setSavedClipIds((current) => ({ ...current, [url]: clipId }));
+  }, []);
+
   // Leaving the page mid-run: kill the upload and the 1.5 s poll loop.
   useEffect(
     () => () => {
@@ -621,6 +650,7 @@ export default function StudioApp() {
         if (!controller.signal.aborted) setCloudState(next);
       };
 
+      setCloudClipIds({});
       try {
         safeSet({ status: "uploading", progress: 0 });
         const created = await createJob(CLOUD_API, {
@@ -674,7 +704,7 @@ export default function StudioApp() {
           return;
         }
         cloudObjectUrlsRef.current = finished.objectUrls;
-        safeSet({ status: "done", clips: finished.clips });
+        safeSet({ status: "done", jobId: created.job_id, clips: finished.clips });
       } catch (e) {
         if (controller.signal.aborted) return;
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -777,8 +807,37 @@ export default function StudioApp() {
   const handleReset = useCallback(() => {
     handleCloudCancel();
     handleClearFile();
+    setSavedClipIds({});
+    setCloudClipIds({});
     reset();
   }, [handleCloudCancel, handleClearFile, reset]);
+
+  // The library rows this cloud run wrote, once it is done and there is
+  // somewhere to post them. Gated on a connected channel rather than merely
+  // on a session: with nothing connected the lookup could not produce a
+  // button, and a request that cannot change what is on screen is one not
+  // worth making. Never throws and never blocks the results — a lookup that
+  // comes back empty simply costs the Post buttons, which is the honest
+  // outcome when we cannot name the row an upload would read.
+  const cloudDoneJobId = cloudState.status === "done" ? cloudState.jobId : "";
+  const canPostClips = canPublish(connections);
+  useEffect(() => {
+    if (cloudDoneJobId === "" || !canPostClips) return;
+    let cancelled = false;
+    void (async () => {
+      const rows = await libraryClipsForJob(cloudDoneJobId);
+      if (cancelled) return;
+      const ids: Record<number, string> = {};
+      for (const [clipIndex, row] of rows) {
+        // Only a row whose FILE is still there can be posted.
+        if (row.available) ids[clipIndex] = row.id;
+      }
+      setCloudClipIds(ids);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudDoneJobId, canPostClips]);
 
   // A stray drop outside the dropzone must never navigate the tab away from
   // a run; in the idle view it counts as a file pick instead.
@@ -873,9 +932,29 @@ export default function StudioApp() {
                   cloudState.clips.length > 2 ? "xl:max-w-6xl xl:grid-cols-3" : ""
                 }`}
               >
-                {cloudState.clips.map((clip, i) => (
-                  <ClipCard key={clip.id} clip={clip} index={i} />
-                ))}
+                {cloudState.clips.map((clip, i) => {
+                  // Keyed by the clip's index within its JOB, not by its
+                  // position here — a clip that failed to render leaves a gap
+                  // in the first and not in the second.
+                  const clipId = cloudClipIds[clip.clipIndex];
+                  return (
+                    <ClipCard
+                      key={clip.id}
+                      clip={clip}
+                      index={i}
+                      postAction={
+                        clipId ? (
+                          <PostToYouTube
+                            clipId={clipId}
+                            clipTitle={clip.title}
+                            topHook={clip.hooks[0] ?? ""}
+                            ariaSuffix={`clip ${i + 1}`}
+                          />
+                        ) : null
+                      }
+                    />
+                  );
+                })}
               </div>
 
               <p className="mt-10 text-center font-mono text-xs text-zinc-500">
@@ -980,8 +1059,25 @@ export default function StudioApp() {
                     clip={clip}
                     index={i}
                     height={state.renderOptions.height}
+                    onSaved={(saved) => rememberSavedClip(clip.url, saved.id)}
                   />
                 )}
+                // Posting sends the clip to a channel, so it needs the copy
+                // on the server: the chip appears once THIS file is in the
+                // library, and the same file-keyed map means baking in an
+                // edit takes it away again until the new file is saved too.
+                renderPostAction={(clip, i) => {
+                  const clipId = savedClipIds[clip.url];
+                  return clipId ? (
+                    <PostToYouTube
+                      key={clip.url}
+                      clipId={clipId}
+                      clipTitle={clip.title}
+                      topHook={clip.hooks[0] ?? ""}
+                      ariaSuffix={`clip ${i + 1}`}
+                    />
+                  ) : null;
+                }}
               />
             </div>
           ) : (

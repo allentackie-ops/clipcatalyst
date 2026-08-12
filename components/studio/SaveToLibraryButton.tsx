@@ -23,7 +23,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui";
 import { useAccount } from "@/components/account/AccountProvider";
-import { uploadClip, type ClipWord } from "@/lib/account";
+import {
+  uploadClip,
+  type ClipWord,
+  type LibraryClipDetail,
+} from "@/lib/account";
 import { outputWidth } from "@/lib/studio/render";
 import type { FinishedClip, RenderOptions } from "@/lib/studio/types";
 import { cloudEnabled } from "./cloud";
@@ -41,12 +45,18 @@ export default function SaveToLibraryButton({
   clip,
   index,
   height,
+  onSaved,
 }: {
   clip: FinishedClip;
   index: number;
   /** The render's output height — the honest source of the clip's pixel
    *  dimensions, since a FinishedClip carries only its blob. */
   height: RenderOptions["height"];
+  /** The saved row, handed up once. This click is what gives a device clip a
+   *  library id, and a library id is the only thing that can be posted to a
+   *  channel (PUBLISH.md Part 4) — so the "Post to YouTube" chip on this card
+   *  appears the moment the clip is somewhere a post could read it from. */
+  onSaved?: (saved: LibraryClipDetail) => void;
 }) {
   const { user } = useAccount();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -77,7 +87,7 @@ export default function SaveToLibraryButton({
           // browser's carries an absent field. Same fact, two spellings.
           speaker: word.speaker ?? null,
         }));
-      await uploadClip(
+      const saved = await uploadClip(
         clip.blob,
         `clipcatalyst-${index + 1}.${clip.extension}`,
         {
@@ -107,6 +117,7 @@ export default function SaveToLibraryButton({
       );
       if (deadRef.current) return;
       setPhase("saved");
+      onSaved?.(saved);
     } catch (e) {
       if (deadRef.current) return;
       setPhase("error");
@@ -114,7 +125,7 @@ export default function SaveToLibraryButton({
         e instanceof Error ? e.message : "Saving that clip didn't work."
       );
     }
-  }, [clip, height, index, phase]);
+  }, [clip, height, index, onSaved, phase]);
 
   // No account, no destination — and with no cloud API configured there is no
   // library at all.

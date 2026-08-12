@@ -274,10 +274,20 @@ export async function pollJob(
 }
 
 /**
- * FinishedClip plus the server-computed speaker count. Cloud clips carry no
- * words, so ClipCard can't derive the count locally — the server reports it.
+ * FinishedClip plus the two things only the server knows about a cloud clip:
+ * the speaker count (cloud clips carry no words, so ClipCard can't derive it)
+ * and `clipIndex`.
+ *
+ * `clipIndex` is the clip's index WITHIN ITS JOB, which is not its position in
+ * this array — a clip that failed to render is skipped, so a job whose second
+ * clip died hands back indexes 0 and 2. It is carried because the library row
+ * the worker wrote is keyed by (job, index), and posting a cloud clip means
+ * finding that row (lib/account.libraryClipsForJob).
  */
-export type CloudFinishedClip = FinishedClip & { speakerCount?: number };
+export type CloudFinishedClip = FinishedClip & {
+  speakerCount?: number;
+  clipIndex: number;
+};
 
 /**
  * Map server clips into the FinishedClip shape ClipCard renders: mp4
@@ -350,6 +360,7 @@ export async function toFinishedClips(
       extension: "mp4",
       blob,
       speakerCount: clip.speaker_count,
+      clipIndex: clip.index,
     });
   }
   return { clips: out, objectUrls };

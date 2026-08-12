@@ -12,6 +12,11 @@
 //
 // A ?plan=starter|pro deep link (the pricing CTAs) auto-starts checkout for
 // that plan exactly once, as soon as the visitor is signed in.
+//
+// ?connected=<platform> and ?connect_error=<code> land here too: they are how
+// the OAuth callback reports back (PUBLISH.md Part 2), and this component
+// reads every one-shot query parameter because it is the one that strips
+// them — two effects both calling replaceState would clobber each other.
 
 import {
   useCallback,
@@ -35,6 +40,7 @@ import {
   type AccountUser,
   type Plan,
 } from "@/lib/account";
+import ConnectionsSection from "@/components/publish/ConnectionsSection";
 import { useAccount } from "./AccountProvider";
 import GoogleSignInButton from "./GoogleSignInButton";
 import LibrarySection from "./LibrarySection";
@@ -714,6 +720,14 @@ type ConfirmState = "idle" | "polling" | "confirmed" | "timeout";
 const CONFIRM_INTERVAL_MS = 2000;
 const CONFIRM_ATTEMPTS = 10;
 
+/** A slug the connect flow may have put in the URL — a platform name or an
+ *  error code — or null. Anything else is dropped rather than rendered: these
+ *  arrive as text in an address bar, which is the one place a value can be
+ *  typed by somebody who is not our server. */
+function connectSlug(value: string | null): string | null {
+  return value !== null && /^[a-z0-9_]{1,32}$/.test(value) ? value : null;
+}
+
 export default function AccountApp() {
   const { user, loading, refresh, signOut } = useAccount();
 
@@ -724,16 +738,30 @@ export default function AccountApp() {
   const [billingError, setBillingError] = useState<string | null>(null);
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [connected, setConnected] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
-  // One-shot query params (?checkout=…, ?plan=…) → state, then stripped from
-  // the URL so a reload or back-navigation never replays them.
+  // One-shot query params (?checkout=…, ?plan=…, ?connected=…,
+  // ?connect_error=…) → state, then stripped from the URL so a reload or
+  // back-navigation never replays them.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const co = params.get("checkout");
     if (co === "success" || co === "cancelled") setCheckoutReturn(co);
     const plan = params.get("plan");
     if (plan === "starter" || plan === "pro") setPendingPlan(plan);
-    if (co !== null || plan !== null) {
+    // The end of an OAuth flow (PUBLISH.md Part 2). Stripping matters more
+    // here than anywhere else on this page: the URL the browser arrived from
+    // carried a one-time authorization code, and the notice these produce
+    // must not reappear on a refresh as though it had just happened again.
+    setConnected(connectSlug(params.get("connected")));
+    setConnectError(connectSlug(params.get("connect_error")));
+    if (
+      co !== null ||
+      plan !== null ||
+      params.has("connected") ||
+      params.has("connect_error")
+    ) {
       window.history.replaceState(
         null,
         "",
@@ -1004,6 +1032,17 @@ export default function AccountApp() {
                 <LibrarySection
                   user={user}
                   planLabel={PLAN_LABELS[effectivePlan(user)]}
+                />
+              </div>
+
+              {/* Where a finished clip can go. Its own /v1/connections read,
+                  shared with every Post button on this page and in Studio
+                  (ConnectionsProvider), so the grid above and this section
+                  can never disagree about what is connected. */}
+              <div className="mt-10">
+                <ConnectionsSection
+                  connected={connected}
+                  connectError={connectError}
                 />
               </div>
 

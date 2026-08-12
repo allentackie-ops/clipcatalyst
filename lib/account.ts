@@ -1,5 +1,6 @@
 // Typed client for the ClipCatalyst accounts + billing API (ACCOUNTS.md):
-// register / login / logout / me / checkout / portal. The API base is
+// register / login / logout / me / checkout / portal, the clip library
+// (LIBRARY.md) and connected-channel publishing (PUBLISH.md). The API base is
 // cloud.ts's CLOUD_API — exactly one env (NEXT_PUBLIC_CLOUD_API) decides
 // whether any of this is live.
 //
@@ -585,6 +586,239 @@ export async function loadClipSource(clip: LibraryClip): Promise<ClipSource> {
     objectUrl: true,
     mimeType: blob.type,
   };
+}
+
+// ---- Connected channels and posting (PUBLISH.md Parts 2–4) ----
+// Two ideas run through everything below, and both come from the server:
+//
+//   * whether a platform can be CONNECTED, and
+//   * whether a post to it can currently COMPLETE.
+//
+// They are different questions with different answers (TikTok is known and
+// neither; YouTube is both, on a box that has been given credentials), and
+// neither is something this file is allowed to have an opinion about. The
+// frontend renders what `platforms` says, so a review landing — or a key
+// being configured — changes the UI without changing this code.
+
+/** One connected channel (ConnectionOut in models.py). No tokens: the
+ *  response model has nowhere to put one, and neither does this type. */
+export type Connection = {
+  id: string;
+  /** 'youtube' … — matches a `PublishPlatform.platform`. */
+  platform: string;
+  /** What a creator recognises: their channel's title. */
+  account_name: string;
+  /** The provider's own id for it, so two channels can be told apart. */
+  account_id: string;
+  scopes: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+/** A platform this product knows about, and what it can do here today
+ *  (PlatformOut in models.py). Sent for every platform, connected or not. */
+export type PublishPlatform = {
+  platform: string;
+  label: string;
+  /** Can an authorization be started at all right now? */
+  connectable: boolean;
+  /** Why not, in words a creator reads. '' when it can be connected. */
+  reason: string;
+  /** The standing caveat about posting here (uploads land private…). */
+  note: string;
+  /** Is there an adapter in this build that can finish a post? Connectable
+   *  and publishable are separate promises; the Post button follows THIS. */
+  publishable: boolean;
+  /** The visibilities a post may be given, in the order to show them. One
+   *  entry means there is no choice — render the list and it is impossible
+   *  to offer an option the server would silently override. */
+  privacy_choices: string[];
+  /** Set when the platform allows no choice, to the value it forces. */
+  forced_privacy: string;
+};
+
+/** GET /v1/connections — this account's channels, and the whole catalogue. */
+export type ConnectionList = {
+  connections: Connection[];
+  platforms: PublishPlatform[];
+};
+
+/** One post attempt (PublishJobOut in models.py) — the same shape a render
+ *  job's status has, because it is the same kind of thing to a browser: a
+ *  status, a fraction, a line of prose, and an error written to be read. */
+export type PublishJob = {
+  id: string;
+  clip_id: string;
+  platform: string;
+  /** queued | uploading | done | failed. */
+  status: string;
+  /** 0..1. */
+  progress: number;
+  detail: string;
+  error: string | null;
+  title: string;
+  /** What the platform's capability made of the request — not what was asked
+   *  for. `private` while Google's review is outstanding. */
+  privacy: string;
+  video_id: string | null;
+  video_url: string | null;
+  /** The standing caveat, carried on the job so the sheet keeps saying it. */
+  note: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** True once this post has stopped moving, either way. */
+export function publishSettled(job: PublishJob): boolean {
+  return job.status === "done" || job.status === "failed";
+}
+
+/** GET /v1/connections. Never returns a token — there is no field for one. */
+export function listConnections(): Promise<ConnectionList> {
+  return request<ConnectionList>("/v1/connections", {
+    method: "GET",
+    auth: true,
+  });
+}
+
+/**
+ * POST /v1/connections/{platform}/start → where to send the browser.
+ *
+ * The state and PKCE challenge are inside the URL; the verifier stays on the
+ * server, bound to this session. The caller navigates — it does not open a
+ * popup — because the provider's consent screen is a full page and a popup is
+ * the thing phone browsers block.
+ *
+ * 503 is the honest deployment answer (no CC_TOKEN_KEY, no client id, no
+ * public base URL) and arrives as the server's own sentence. A button that
+ * could produce it shouldn't have rendered — `PublishPlatform.connectable`
+ * says so — which is why the caller surfaces it verbatim rather than dressing
+ * it up.
+ */
+export function startConnection(
+  platform: string
+): Promise<{ authorize_url: string }> {
+  return request<{ authorize_url: string }>(
+    `/v1/connections/${encodeURIComponent(platform)}/start`,
+    { auth: true }
+  );
+}
+
+/** DELETE /v1/connections/{id} — revokes with the provider, THEN deletes.
+ *  A 502 means the provider couldn't be reached and nothing was removed: the
+ *  stored tokens are the only thing that can ever revoke that grant, so they
+ *  survive a failed attempt and the caller offers the click again. */
+export async function disconnectConnection(id: string): Promise<void> {
+  await request<{ ok: boolean }>(`/v1/connections/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    auth: true,
+  });
+}
+
+/** What the post sheet sends. Both text fields may be empty, and what an
+ *  empty one means is the adapter's rule (the clip's own title; its top hook)
+ *  rather than a default invented here — so the same post is produced
+ *  whichever client is calling. */
+export type PublishRequest = {
+  platform: string;
+  title: string;
+  description: string;
+  /** A REQUEST. The platform's capability decides, and the job says which. */
+  privacy: string;
+};
+
+/**
+ * POST /v1/clips/{id}/publish — queue an upload of one library clip.
+ *
+ * Returns the job to poll. A second call while one is already in flight is
+ * not an error: the server hands back the job that is already running (200
+ * instead of 202), because a double-tapped button is a double-tapped button
+ * and two uploads would spend two of a day's small handful on one video.
+ *
+ * The refusals are all sentences: 409 for an expired clip or no connected
+ * channel, 503 for a platform this build cannot post to, 404 for somebody
+ * else's clip. Each is shown as it arrives.
+ */
+export function publishClip(
+  clipId: string,
+  body: PublishRequest
+): Promise<PublishJob> {
+  return request<PublishJob>(
+    `/v1/clips/${encodeURIComponent(clipId)}/publish`,
+    { auth: true, body }
+  );
+}
+
+/** GET /v1/publishes/{id} — poll one post. Somebody else's is a 404. */
+export function getPublish(publishId: string): Promise<PublishJob> {
+  return request<PublishJob>(
+    `/v1/publishes/${encodeURIComponent(publishId)}`,
+    { method: "GET", auth: true }
+  );
+}
+
+/** The catalogue entry for one platform, or null when this build's server
+ *  has never heard of it (an older API, or a platform since removed). */
+export function platformFor(
+  list: ConnectionList | null,
+  platform: string
+): PublishPlatform | null {
+  return list?.platforms.find((p) => p.platform === platform) ?? null;
+}
+
+/** This account's connection for one platform, or null. First wins: a second
+ *  channel on the same platform is possible in the schema, and the card that
+ *  posts needs one destination, not a list. */
+export function connectionFor(
+  list: ConnectionList | null,
+  platform: string
+): Connection | null {
+  return list?.connections.find((c) => c.platform === platform) ?? null;
+}
+
+/** True when at least one platform can currently complete a post AND has a
+ *  channel connected — i.e. a Post control could really appear somewhere. The
+ *  question is asked platform-agnostically on purpose: a caller that wants to
+ *  know "is any of this worth setting up?" should not have to name YouTube. */
+export function canPublish(list: ConnectionList | null): boolean {
+  return (
+    list?.platforms.some(
+      (platform) =>
+        platform.publishable &&
+        list.connections.some((c) => c.platform === platform.platform)
+    ) ?? false
+  );
+}
+
+/**
+ * The library rows one CLOUD job wrote, keyed by `clip_index`.
+ *
+ * Studio's cloud results are library clips — the worker wrote their rows as it
+ * rendered them — but the job's own clip ids are not the library's, so posting
+ * one needs this lookup. It reads a single newest-first page: the rows were
+ * written seconds ago, so they are at the top of it.
+ *
+ * Never throws. An empty map is the honest outcome of a failed request, a
+ * signed-out session, or a library write that didn't happen (the worker's is
+ * best-effort) — and it costs a Post button that would have 404'd, which is
+ * the right trade in every one of those cases.
+ */
+export async function libraryClipsForJob(
+  jobId: string
+): Promise<Map<number, LibraryClip>> {
+  const found = new Map<number, LibraryClip>();
+  if (jobId === "" || getToken() === null) return found;
+  try {
+    const page = await listClips(null, 50);
+    for (const clip of page.clips) {
+      if (clip.job_id === jobId && !found.has(clip.clip_index)) {
+        found.set(clip.clip_index, clip);
+      }
+    }
+  } catch {
+    // A library we couldn't read is a library we don't offer to post from.
+  }
+  return found;
 }
 
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);

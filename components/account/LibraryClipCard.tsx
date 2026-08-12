@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge, Card, ScoreRing } from "@/components/ui";
 import { formatBytes, formatDuration } from "@/components/studio/format";
+import PostToYouTube from "@/components/publish/PostToYouTube";
 import { loadClipSource, type ClipSource, type LibraryClip } from "@/lib/account";
 
 const MARKERS = ["A", "B", "C"] as const;
@@ -369,6 +370,20 @@ export default function LibraryClipCard({
                 </svg>
                 {downloading ? "Preparing…" : "Download"}
               </button>
+            ) : null}
+            {/* Posting needs the FILE, so an expired clip gets no control —
+                its row is still here, and the server would refuse the upload
+                with exactly that explanation. PostToYouTube itself renders
+                nothing unless a channel is connected and this build can
+                really finish a post (PUBLISH.md). */}
+            {clip.available ? (
+              <PostToYouTube
+                clipId={clip.id}
+                clipTitle={title}
+                topHook={clip.hooks[0] ?? ""}
+                ariaSuffix={title}
+                size="sm"
+              />
             ) : null}
             <button
               ref={deleteButtonRef}

@@ -17,6 +17,7 @@ export default function ClipCard({
   edited = false,
   onEdit,
   saveAction,
+  postAction,
 }: {
   /** Cloud clips carry a server-computed speakerCount (their words are []). */
   clip: FinishedClip & { speakerCount?: number };
@@ -29,6 +30,11 @@ export default function ClipCard({
    *  rather than built here: uploading is an account concern, and a card that
    *  imported one would drag it into every grid that shows a clip. */
   saveAction?: ReactNode;
+  /** "Post to YouTube", when this clip has a library row and a channel is
+   *  connected (PUBLISH.md Part 4). Passed in for the same reason `saveAction`
+   *  is, and absent far more often than not — a clip has to be in the library
+   *  before there is anything to post. */
+  postAction?: ReactNode;
 }) {
   const duration = clip.end - clip.start;
   const format = clip.extension === "mp4" ? "MP4" : "WEBM";
@@ -175,6 +181,7 @@ export default function ClipCard({
             Edit
           </button>
         ) : null}
+        {postAction}
         {saveAction}
       </div>
     </Card>

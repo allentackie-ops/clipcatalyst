@@ -38,8 +38,18 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
       { label: "Blog", href: "#" },
       { label: "Affiliates — 20% lifetime", href: "#" },
       { label: "Contact", href: "#" },
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms of Service", href: "/terms" },
     ],
   },
+];
+
+// Also in the bottom bar, not only in the Company column: these two URLs go
+// into the YouTube, TikTok and Meta applications, and the bottom bar is where
+// a reviewer (and everybody else) looks for them.
+const legal: { label: string; href: string }[] = [
+  { label: "Privacy", href: "/privacy" },
+  { label: "Terms", href: "/terms" },
 ];
 
 export default function Footer() {
@@ -74,10 +84,21 @@ export default function Footer() {
             </div>
           ))}
         </div>
-        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-line pt-8 sm:flex-row">
+        <div className="mt-12 flex flex-col items-center gap-4 border-t border-line pt-8 sm:flex-row sm:justify-between">
           <p className="text-xs text-zinc-500">
             © 2026 ClipCatalyst. All rights reserved.
           </p>
+          <nav aria-label="Legal" className="flex items-center gap-5">
+            {legal.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
           <p className="text-xs text-zinc-500">
             Made for creators who&apos;d rather create.
           </p>

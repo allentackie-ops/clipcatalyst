@@ -85,6 +85,49 @@ _CLIP_COLUMNS = (
     "expires_at",
 )
 
+#: One connected publishing account (PUBLISH.md Part 2). The `*_enc` pair is
+#: ciphertext at every layer above this one: nothing in db.py can read it,
+#: nothing in models.py can carry it, and no route returns it.
+_CONNECTION_COLUMNS = (
+    "id",
+    "user_id",
+    "platform",
+    "account_name",
+    "account_id",
+    "access_token_enc",
+    "refresh_token_enc",
+    "expires_at",
+    "scopes",
+    "created_at",
+    "updated_at",
+)
+
+# What a stored connection may have rewritten after the fact: its tokens, their
+# deadline, the granted scopes, and the channel's display name.
+#
+# `user_id`, `platform` and `account_id` are deliberately absent — together they
+# ARE the connection's identity (the UNIQUE index is built on them), so an
+# update that could move any of them would be able to re-point one account's
+# stored tokens at another account's row.
+_CONNECTION_UPDATABLE = {
+    "account_name",
+    "access_token_enc",
+    "refresh_token_enc",
+    "expires_at",
+    "scopes",
+}
+
+_OAUTH_STATE_COLUMNS = (
+    "state_hash",
+    "user_id",
+    "session_hash",
+    "platform",
+    "verifier_enc",
+    "redirect_uri",
+    "created_at",
+    "expires_at",
+)
+
 _USER_COLUMNS = (
     "id",
     "email",
@@ -234,6 +277,59 @@ CREATE TABLE IF NOT EXISTS clips (
     bytes         INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     expires_at    TEXT NOT NULL DEFAULT ''
+)
+""",
+    # A connected publishing account (PUBLISH.md Part 2). The two `*_enc`
+    # columns are Fernet CIPHERTEXT and nothing else ever goes in them — see
+    # connections.py, which is the only module that can read them. `expires_at`
+    # is the ACCESS token's deadline (the refresh token has none), and
+    # `account_id` is the provider's own id for the channel, which is what
+    # makes reconnecting the same channel an update rather than a duplicate.
+    """
+CREATE TABLE IF NOT EXISTS connections (
+    id                TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL,
+    platform          TEXT NOT NULL,
+    account_name      TEXT NOT NULL DEFAULT '',
+    account_id        TEXT NOT NULL DEFAULT '',
+    access_token_enc  TEXT NOT NULL DEFAULT '',
+    refresh_token_enc TEXT NOT NULL DEFAULT '',
+    expires_at        TEXT NOT NULL DEFAULT '',
+    scopes            TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+)
+""",
+    # One account connects one channel once: reconnecting the same channel
+    # REPLACES its tokens (see upsert_connection) instead of leaving a second
+    # row nobody can tell apart, and two simultaneous callbacks race here
+    # rather than both inserting.
+    """
+CREATE UNIQUE INDEX IF NOT EXISTS connections_identity
+    ON connections (user_id, platform, account_id)
+""",
+    # The in-flight half of an OAuth authorization (PUBLISH.md Part 2). One row
+    # per `start`, spent by the matching callback and gone either way.
+    #
+    # `state_hash` is the sha256 of the state's nonce, exactly as sessions and
+    # sign-in codes are stored: the value that travels through the browser and
+    # the provider is never the value on disk. `verifier_enc` is the PKCE
+    # verifier, encrypted with the same key the tokens are — it is the secret
+    # that turns an intercepted authorization code into tokens, so it is not
+    # kept in plaintext either. `session_hash` is what "bound to the session"
+    # means here: the callback arrives as a bare browser redirect with no
+    # Authorization header, so the account a connection lands on comes from
+    # THIS row, and the flow is refused if that session has since ended.
+    """
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state_hash   TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    session_hash TEXT NOT NULL,
+    platform     TEXT NOT NULL,
+    verifier_enc TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
 )
 """,
     # The library list is always "this user's clips, newest first" — the index
@@ -1324,3 +1420,228 @@ def extend_clip_expiry(user_id: str, retention_days: int | None) -> int:
             )
             changed += 1
     return changed
+
+
+# --------------------------------------------------------------------------- #
+# Publishing connections (PUBLISH.md Part 2).
+#
+# Every function here moves ciphertext it cannot read. That is not a limitation
+# to work around: db.py has no key, connections.py has the only one, and the
+# split is what makes "a token is never in the database in plaintext" a shape
+# of the code rather than a habit somebody has to keep.
+# --------------------------------------------------------------------------- #
+
+
+def _connection_dict(row: sqlite3.Row) -> dict:
+    return {key: row[key] for key in _CONNECTION_COLUMNS}
+
+
+def upsert_connection(
+    connection_id: str,
+    *,
+    user_id: str,
+    platform: str,
+    account_name: str,
+    account_id: str,
+    access_token_enc: str,
+    refresh_token_enc: str,
+    expires_at: str,
+    scopes: str,
+) -> dict:
+    """Store a connected account, replacing this account's tokens for it.
+
+    Keyed on (user_id, platform, account_id), so reconnecting the SAME channel
+    is an update — new tokens on the existing row, same id, `created_at`
+    preserved — and connecting a second channel on the same platform is a new
+    row. Two callbacks racing for one channel meet the UNIQUE index and one of
+    them takes the update path instead of both inserting.
+
+    The refresh token is the one field a re-connect may NOT blank. Providers
+    hand one out on the first authorization and often not again (Google only
+    re-issues under ``prompt=consent``), so writing an empty value over a
+    stored one would silently turn a working connection into one that dies at
+    the next access-token expiry — with the user having just done the thing
+    that was supposed to fix it.
+    """
+    now = _now()
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO connections (id, user_id, platform, account_name,"
+            " account_id, access_token_enc, refresh_token_enc, expires_at,"
+            " scopes, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (user_id, platform, account_id) DO UPDATE SET"
+            " account_name = excluded.account_name,"
+            " access_token_enc = excluded.access_token_enc,"
+            " refresh_token_enc = CASE WHEN excluded.refresh_token_enc != ''"
+            " THEN excluded.refresh_token_enc ELSE connections.refresh_token_enc END,"
+            " expires_at = excluded.expires_at, scopes = excluded.scopes,"
+            " updated_at = excluded.updated_at",
+            (
+                connection_id,
+                user_id,
+                platform,
+                account_name,
+                account_id,
+                access_token_enc,
+                refresh_token_enc,
+                expires_at,
+                scopes,
+                now,
+                now,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM connections WHERE user_id = ? AND platform = ?"
+            " AND account_id = ?",
+            (user_id, platform, account_id),
+        ).fetchone()
+    assert row is not None  # we just inserted or updated it
+    return _connection_dict(row)
+
+
+def get_connection(connection_id: str) -> dict | None:
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM connections WHERE id = ?", (connection_id,)
+        ).fetchone()
+    return None if row is None else _connection_dict(row)
+
+
+def list_connections(user_id: str) -> list[dict]:
+    """One account's connected channels, oldest first within a platform."""
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT * FROM connections WHERE user_id = ?"
+            " ORDER BY platform, created_at, id",
+            (user_id,),
+        ).fetchall()
+    return [_connection_dict(row) for row in rows]
+
+
+def get_platform_connection(user_id: str, platform: str) -> dict | None:
+    """The connection a publish to `platform` would use, else None.
+
+    The oldest one, deterministically, for the day a platform allows more than
+    one channel per account — a publish must never depend on row order.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM connections WHERE user_id = ? AND platform = ?"
+            " ORDER BY created_at, id LIMIT 1",
+            (user_id, platform),
+        ).fetchone()
+    return None if row is None else _connection_dict(row)
+
+
+def update_connection(connection_id: str, **fields: object) -> None:
+    """Rewrite a connection's tokens/scopes/name; `updated_at` moves with them.
+
+    The whitelist is _CONNECTION_UPDATABLE, and the fields it leaves out are
+    the ones that say WHOSE connection this is.
+    """
+    if not fields:
+        return
+    unknown = set(fields) - _CONNECTION_UPDATABLE
+    if unknown:
+        raise ValueError(f"update_connection: unknown fields {sorted(unknown)!r}")
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            f"UPDATE connections SET {assignments}, updated_at = ? WHERE id = ?",
+            (*fields.values(), _now(), connection_id),
+        )
+
+
+def delete_connection(connection_id: str) -> bool:
+    """Forget a connection outright. True when a row was actually removed."""
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
+    return cur.rowcount == 1
+
+
+def _oauth_state_dict(row: sqlite3.Row) -> dict:
+    return {key: row[key] for key in _OAUTH_STATE_COLUMNS}
+
+
+def put_oauth_state(
+    state_hash: str,
+    *,
+    user_id: str,
+    session_hash: str,
+    platform: str,
+    verifier_enc: str,
+    redirect_uri: str,
+    expires_at: str,
+) -> None:
+    """Stage one in-flight authorization. The nonce itself is never stored."""
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO oauth_states (state_hash, user_id, session_hash,"
+            " platform, verifier_enc, redirect_uri, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                state_hash,
+                user_id,
+                session_hash,
+                platform,
+                verifier_enc,
+                redirect_uri,
+                _now(),
+                expires_at,
+            ),
+        )
+
+
+def consume_oauth_state(state_hash: str) -> dict | None:
+    """Spend an in-flight authorization, once. The row, or None.
+
+    Single use is decided HERE and by the DELETE, exactly as it is for sign-in
+    codes: the read and the removal are one transaction, so a state replayed by
+    a second request — the CSRF attempt this whole mechanism exists for — finds
+    nothing, whether it arrives an hour later or in the same millisecond as the
+    first. An expired row is likewise not found, so the TTL is enforced by this
+    read rather than by whether a sweep has run.
+    """
+    now = _now()
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT * FROM oauth_states WHERE state_hash = ? AND expires_at > ?",
+                (state_hash, now),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            cur = conn.execute(
+                "DELETE FROM oauth_states WHERE state_hash = ?", (state_hash,)
+            )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return _oauth_state_dict(row) if cur.rowcount == 1 else None
+
+
+def purge_expired_oauth_states(now_iso: str | None = None) -> int:
+    """Delete authorizations nobody came back for; returns the count.
+
+    Hygiene, never security — an expired state is already refused by
+    consume_oauth_state — so this only keeps the table from collecting the
+    flows people abandoned at the provider's consent screen.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute(
+            "DELETE FROM oauth_states WHERE expires_at <= ?", (now_iso or _now(),)
+        )
+        return cur.rowcount

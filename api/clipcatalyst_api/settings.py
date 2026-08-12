@@ -90,6 +90,21 @@ class Settings:
     # monthly quota (nothing rendered on our hardware).
     max_clip_bytes: int = 200_000_000  # 200 MB
     library_max_bytes: int = 5_000_000_000  # 5 GB per account
+    # Publishing connections (PUBLISH.md Part 2). `token_key` is the Fernet key
+    # every stored provider token is encrypted with, and the ONE thing standing
+    # between a leaked database file and somebody's YouTube channel. Empty is
+    # the honest off switch: connecting answers 503 and NOTHING is written,
+    # because the alternative — storing a refresh token in plaintext "just for
+    # now" — is the failure this key exists to prevent.
+    token_key: str = ""
+    # The OAuth client the YouTube connection runs as. Deliberately NOT
+    # google_client_id: that one is an identity client with no secret and no
+    # sensitive scopes (see its comment), while this one redeems authorization
+    # codes for tokens that can upload to somebody's channel. The same Google
+    # Cloud project can own both; the credentials are separate values because
+    # they are separate powers.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
 
     @property
     def uploads_dir(self) -> Path:
@@ -267,4 +282,7 @@ def get_settings() -> Settings:
         google_client_id=os.environ.get("CC_GOOGLE_CLIENT_ID", "").strip(),
         max_clip_bytes=int(os.environ.get("CC_MAX_CLIP_BYTES", "200000000")),
         library_max_bytes=int(os.environ.get("CC_LIBRARY_MAX_BYTES", "5000000000")),
+        token_key=os.environ.get("CC_TOKEN_KEY", "").strip(),
+        youtube_client_id=os.environ.get("CC_YOUTUBE_CLIENT_ID", "").strip(),
+        youtube_client_secret=os.environ.get("CC_YOUTUBE_CLIENT_SECRET", "").strip(),
     )

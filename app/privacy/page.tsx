@@ -55,8 +55,9 @@ const SECTIONS: DocSection[] = [
               pipeline in this product.
             </>,
             <>
-              No analytics, no advertising trackers, no third-party scripts, and
-              no cookies.
+              No analytics, no advertising trackers, and no cookies set by this
+              site. There is exactly one third-party script: Google&apos;s own
+              sign-in SDK, which loads on the account page and nowhere else.
             </>,
             <>
               Card details never reach us. Stripe handles payment; we store a
@@ -150,6 +151,25 @@ const SECTIONS: DocSection[] = [
           Where S3 is used, a clip is handed to your browser as a short-lived
           signed link rather than a public URL.
         </P>
+
+        <Sub>Posting a clip to a channel</Sub>
+        <P>
+          Asking us to post a clip writes a second, separate record for that one
+          attempt. It holds the title and the description you typed (either can
+          be left blank, and then the clip&apos;s own title and its top hook are
+          used), the privacy the post will really have once your choice is
+          resolved against what the platform currently allows, the status and
+          progress of the upload, a user-facing error if it failed, and, once it
+          succeeds, the video id and watch URL the platform gave back. It holds
+          no token of any kind, and no part of our API returns one.
+        </P>
+        <P>
+          A finished attempt, successful or not, is deleted 48 hours after it
+          was made. Deleting it changes nothing about the video: what you posted
+          stays on your channel under that platform&apos;s own terms until you
+          remove it there, and the clip in your library keeps its own retention
+          deadline.
+        </P>
       </>
     ),
   },
@@ -220,11 +240,20 @@ const SECTIONS: DocSection[] = [
               <DocLink href="#payments">Payments</DocLink>);
             </>,
             <>
-              your brand kit: a caption colour, and the logo file itself if you
+              your brand kit: a caption colour, whether your logo should be
+              burned into a cloud render, and the logo file itself if you
               uploaded one on a plan that includes it.
             </>,
           ]}
         />
+        <Sub>Your monthly clip count</Sub>
+        <P>
+          Separately, one row per account per calendar month records how much of
+          your monthly clip allowance the cloud engine has used. It is three
+          values: the account, the month, and a number. It names no clip, no file
+          and no job. Nothing sweeps that table, so those counters stay for as
+          long as the account does.
+        </P>
         <Sub>Sessions and sign-in codes</Sub>
         <P>
           Signing in mints an opaque token. We store only its{" "}
@@ -305,8 +334,14 @@ const SECTIONS: DocSection[] = [
         <P>
           If you use Sign in with Google, Google gives your browser an identity
           token and your browser sends it to us. We verify its signature against
-          Google&apos;s published public keys — fetching those keys is the only
-          request we make to Google, and your token is never sent anywhere.
+          Google&apos;s published public keys, and your token is never sent
+          anywhere. Fetching those keys is the only request the sign-in flow
+          itself makes to Google. Connecting a YouTube channel is a separate
+          thing, and it does talk to Google:{" "}
+          <DocLink href="#connections">
+            Connecting a YouTube channel
+          </DocLink>{" "}
+          lists what it calls and why.
         </P>
         <P>
           From a verified token we read exactly two values:{" "}
@@ -340,12 +375,26 @@ const SECTIONS: DocSection[] = [
           and display name, the permissions Google granted, when the access token
           expires, and the access and refresh tokens themselves —{" "}
           <Em>encrypted at rest</Em>, with a key the database does not contain.
-          No part of our API returns a token in any response, ever.
+          No part of our API returns a token in any response, ever. Each post you
+          ask for also writes a short-lived record of that attempt, described in{" "}
+          <DocLink href="#cloud-jobs">
+            what a cloud job keeps
+          </DocLink>
+          .
         </P>
         <P>
           <Em>What it is used for.</Em> Uploading the clips you choose to post,
           and naming the connected channel in the app. It is not used for
           advertising, not sold or shared, and not used to train anything.
+        </P>
+        <P>
+          <Em>What we call, and when.</Em> Four requests, and no others:
+          Google&apos;s token endpoint, once to exchange the authorization code
+          when you connect and again whenever the access token has expired; the
+          YouTube channels endpoint, to read the channel&apos;s id and name; the
+          upload endpoint, when you post a clip; and Google&apos;s revoke
+          endpoint, when you disconnect. Nothing runs on a schedule, and nothing
+          is called when you are not connecting, posting or disconnecting.
         </P>
         <P>
           <Em>Disconnecting.</Em> Disconnecting revokes the grant with Google
@@ -406,8 +455,25 @@ const SECTIONS: DocSection[] = [
               can use the same kit.
             </>,
             <>
-              <Em>No cookies.</Em> The session is a bearer token, not a cookie,
-              and the site loads no third-party scripts that could set one.
+              <Em>No cookies from us.</Em> The session is a bearer token in
+              local storage, not a cookie, and this site sets no cookies of its
+              own.
+            </>,
+            <>
+              <Em>One third-party script.</Em> Opening the account page loads
+              Google&apos;s sign-in SDK from{" "}
+              <code className="font-mono text-[0.85em] text-zinc-200">
+                accounts.google.com
+              </code>
+              , which is what draws Google&apos;s own sign-in button. That is
+              the only third-party script on the site: no other page fetches it,
+              nothing fetches it until you open the account page, and whatever
+              it stores in your browser is Google&apos;s, under the{" "}
+              <ExtLink href="https://policies.google.com/privacy">
+                Google Privacy Policy
+              </ExtLink>
+              . Nothing anywhere on the site is loaded for analytics or
+              advertising.
             </>,
           ]}
         />
@@ -420,13 +486,19 @@ const SECTIONS: DocSection[] = [
     body: (
       <>
         <P>
-          Sign-in, registration and checkout are rate-limited, which means we
-          count attempts. The counters are keyed on the caller&apos;s IP address
-          and — for emailed codes — on the address the code was requested for, so
-          nobody can be mail-bombed by a stranger typing their address. They live
-          in Redis, expire on their own after a minute (or an hour for the
-          per-address limit), and are counters rather than a record of what you
-          did.
+          Signing in, registering, starting a checkout, connecting a channel,
+          the redirect back from that connection, and asking us to post a clip
+          are all rate-limited, which means we count attempts. The counters are
+          keyed on the caller&apos;s IP address, and for emailed codes also on
+          the address the code was requested for, so nobody can be mail-bombed by
+          a stranger typing their address.
+        </P>
+        <P>
+          Where the deployment runs the Redis instance the job queue already
+          uses, the counters live there; a deployment without one counts them
+          inside the API process instead. Either way they expire on their own
+          after a minute (an hour for the per-address limit), and they are
+          counters rather than a record of what you did.
         </P>
         <P>
           Application logs record job and clip identifiers and the reason

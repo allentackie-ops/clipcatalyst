@@ -120,7 +120,7 @@ async function request<T>(
     });
   } catch {
     throw new AccountError(
-      "Couldn't reach the ClipCatalyst server — check your connection and try again.",
+      "Couldn't reach the ClipCatalyst server. Check your connection and try again.",
       0
     );
   }
@@ -457,7 +457,7 @@ export function uploadClip(
     if (token === null) {
       reject(
         new AccountError(
-          "You're signed out — sign in to save clips to your library.",
+          "You're signed out. Sign in to save clips to your library.",
           401
         )
       );
@@ -504,7 +504,7 @@ export function uploadClip(
     xhr.onerror = () =>
       reject(
         new AccountError(
-          "Couldn't reach the ClipCatalyst server — the clip is still on your device.",
+          "Couldn't reach the ClipCatalyst server, so the clip is still on your device.",
           0
         )
       );
@@ -552,7 +552,7 @@ export async function loadClipSource(clip: LibraryClip): Promise<ClipSource> {
   const raw = clip.url ?? "";
   if (!clip.available || raw === "") {
     throw new AccountError(
-      "That clip's video has expired — its card is still here.",
+      "That clip's video has expired, but its card is still here.",
       404
     );
   }
@@ -560,14 +560,14 @@ export async function loadClipSource(clip: LibraryClip): Promise<ClipSource> {
   if (!isApiUrl(raw)) return { url, objectUrl: false, mimeType: "" };
   const token = getToken();
   if (token === null) {
-    throw new AccountError("You're signed out — sign in to play this clip.", 401);
+    throw new AccountError("You're signed out. Sign in to play this clip.", 401);
   }
   let res: Response;
   try {
     res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   } catch {
     throw new AccountError(
-      "Couldn't reach the ClipCatalyst server — check your connection and try again.",
+      "Couldn't reach the ClipCatalyst server. Check your connection and try again.",
       0
     );
   }

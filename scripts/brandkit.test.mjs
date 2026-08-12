@@ -298,23 +298,23 @@ ok("LOGO_MARGIN_RATIO = 0.02", LOGO_MARGIN_RATIO === 0.02);
   }
   ok("exactly MAX_LOGO_BYTES accepted", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES }) === null);
   ok("one byte over rejected", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES + 1 }) !== null);
-  ok("one byte over never reads as the limit", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES + 1 }) === "That logo is 2.01 MB — the limit is 2 MB.", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES + 1 }));
+  ok("one byte over never reads as the limit", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES + 1 }) === "That logo is 2.01 MB, and the limit is 2 MB.", validateLogoFile({ type: "image/png", size: MAX_LOGO_BYTES + 1 }));
 
   const big = validateLogoFile({ type: "image/png", size: 3_400_000 });
-  ok("oversize message names both numbers", big === "That logo is 3.4 MB — the limit is 2 MB.", `${big}`);
+  ok("oversize message names both numbers", big === "That logo is 3.4 MB, and the limit is 2 MB.", `${big}`);
 
-  const wrongType = "That file isn't an image we can use — pick a PNG, JPEG, WebP or SVG.";
+  const wrongType = "That file isn't an image we can use. Pick a PNG, JPEG, WebP or SVG.";
   ok("GIF rejected", validateLogoFile({ type: "image/gif", size: 1_000 }) === wrongType, `${validateLogoFile({ type: "image/gif", size: 1_000 })}`);
   ok("PDF rejected", validateLogoFile({ type: "application/pdf", size: 1_000 }) === wrongType);
   ok("empty type rejected", validateLogoFile({ type: "", size: 1_000 }) === wrongType);
   ok("missing type rejected", validateLogoFile({ size: 1_000 }) === wrongType);
   ok("type is checked before size", validateLogoFile({ type: "image/gif", size: 9_000_000 }) === wrongType);
 
-  const empty = "That file is empty — pick a PNG, JPEG, WebP or SVG.";
+  const empty = "That file is empty. Pick a PNG, JPEG, WebP or SVG.";
   ok("zero-byte file rejected", validateLogoFile({ type: "image/png", size: 0 }) === empty, `${validateLogoFile({ type: "image/png", size: 0 })}`);
   ok("negative size rejected", validateLogoFile({ type: "image/png", size: -1 }) === empty);
 
-  const unreadable = "That file couldn't be read — try picking it again.";
+  const unreadable = "That file couldn't be read. Try picking it again.";
   ok("NaN size rejected", validateLogoFile({ type: "image/png", size: NaN }) === unreadable, `${validateLogoFile({ type: "image/png", size: NaN })}`);
   ok("missing size rejected", validateLogoFile({ type: "image/png" }) === unreadable);
   ok("no file at all rejected", validateLogoFile(undefined) === unreadable);

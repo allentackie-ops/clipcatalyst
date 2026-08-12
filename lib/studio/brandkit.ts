@@ -223,16 +223,16 @@ function finiteOr(value: number | undefined, fallback: number): number {
  */
 export function validateLogoFile(file: { type: string; size: number }): string | null {
   if (!file || typeof file.size !== "number" || !Number.isFinite(file.size)) {
-    return "That file couldn't be read — try picking it again.";
+    return "That file couldn't be read. Try picking it again.";
   }
   if (typeof file.type !== "string" || !LOGO_TYPES.includes(file.type)) {
-    return "That file isn't an image we can use — pick a PNG, JPEG, WebP or SVG.";
+    return "That file isn't an image we can use. Pick a PNG, JPEG, WebP or SVG.";
   }
   if (file.size <= 0) {
-    return "That file is empty — pick a PNG, JPEG, WebP or SVG.";
+    return "That file is empty. Pick a PNG, JPEG, WebP or SVG.";
   }
   if (file.size > MAX_LOGO_BYTES) {
-    return `That logo is ${formatMb(file.size)} MB — the limit is ${formatMb(MAX_LOGO_BYTES)} MB.`;
+    return `That logo is ${formatMb(file.size)} MB, and the limit is ${formatMb(MAX_LOGO_BYTES)} MB.`;
   }
   return null;
 }

@@ -44,11 +44,11 @@ const HELP_REPLY = [
   'I edit with plain commands. Pauses: "remove the pause at 0:14" · "remove all the pauses" · "tighten it up".',
   'Pace: "make it more energetic". Zooms: "add a zoom at 0:08" · "punch in when he says funnels" · "remove the zooms".',
   'Trims: "trim the first 2 seconds" · "start 2 seconds later" · "extend the end by 2 seconds".',
-  'Also: "captions off" · "use hook 2" · "try another hook" · "undo" · "reset" — and add "clip 2" to aim at another clip.',
+  'Also: "captions off" · "use hook 2" · "try another hook" · "undo" · "reset". Add "clip 2" to aim at another clip.',
 ].join(" ");
 
 const UNKNOWN_REPLY =
-  'I didn\'t catch that — try "remove the pause at 0:14", "make it more energetic", or "trim the first 2 seconds". Say "help" for the full list.';
+  'I didn\'t catch that. Try "remove the pause at 0:14", "make it more energetic", or "trim the first 2 seconds". Say "help" for the full list.';
 
 /** A sentence governed by a negation token must never execute the command it
  *  negates — a wrong parse is far worse than an honest unknown. Normalize
@@ -56,26 +56,26 @@ const UNKNOWN_REPLY =
 const NEGATION_RE = /\bdont\b|\bdo not\b|\bnever\b|\bno need\b|\bstop\s+(?:\w+\s+)?\w+ing\b/;
 
 const NEGATION_REPLY =
-  'Sounds like you want that left alone — I only act on direct commands like "remove the pause at 0:14" or "captions off".';
+  'Sounds like you want that left alone. I only act on direct commands like "remove the pause at 0:14" or "captions off".';
 
 /** Praising or protecting a pause ("keep the pauses") is not a removal
  *  order; nor is the bare noun without a removal verb. */
 const KEEP_PAUSE_REPLY =
-  'Sounds like you want that kept, so I left it alone — I only cut pauses when asked directly, like "remove the pause at 0:14" or "remove all the pauses".';
+  'Sounds like you want that kept, so I left it alone. I only cut pauses when asked directly, like "remove the pause at 0:14" or "remove all the pauses".';
 
 const PAUSE_VERB_REPLY =
   'Do you want it cut? Say "remove the pause at 0:14" or "remove all the pauses".';
 
 const CROP_REPLY =
-  'I can\'t change the crop or framing yet — for pacing, try "tighten it up" or "remove the pause at 0:14".';
+  'I can\'t change the crop or framing yet. For pacing, try "tighten it up" or "remove the pause at 0:14".';
 
 const CAPTION_STYLE_REPLY =
-  'I can only turn captions on or off right now — try "captions off" or "captions on".';
+  'I can only turn captions on or off right now. Try "captions off" or "captions on".';
 
 /** clearZooms is the only zoom removal we have; when the user scoped the ask
  *  to one zoom the note must admit the real blast radius. */
 const ZOOM_CLEAR_ALL_NOTE =
-  'I can\'t remove just one zoom yet, so all zooms were cleared — re-add any you want with "add a zoom at 0:08".';
+  'I can\'t remove just one zoom yet, so all zooms were cleared. Re-add any you want with "add a zoom at 0:08".';
 
 /** Caption styling words — size, weight, color, font — that we cannot honor. */
 const CAPTION_STYLE_RE =
@@ -200,8 +200,8 @@ function extractTarget(text: string, ctx: IntentContext): ClipTarget {
   const outOfRange = (): ClipTarget => ({
     reply:
       count === 1
-        ? 'There\'s only one clip here — drop the clip number and I\'ll edit this one.'
-        : `There are only ${count} clips — try "clip 1" through "clip ${count}".`,
+        ? 'There\'s only one clip here, so drop the clip number and I\'ll edit this one.'
+        : `There are only ${count} clips. Try "clip 1" through "clip ${count}".`,
   });
   let m = text.match(/\bclip\s*#?\s*(\d+)\b/);
   if (m) {
@@ -273,7 +273,7 @@ function parse(input: string, ctx: IntentContext): Intent {
           commands.push(...p.commands);
           if (p.note !== undefined) notes.push(p.note);
         } else {
-          notes.push(`I didn't understand "${clauses[i]}" — say "help" for what I can do.`);
+          notes.push(`I didn't understand "${clauses[i]}". Say "help" for what I can do.`);
         }
       });
       if (notes.length === 0) return { kind: "commands", commands, targetClip: target.clip };
@@ -354,7 +354,7 @@ function parseClause(text: string, ctx: IntentContext, targetClip: number): Inte
         if (w) return cmd([{ type: "zoom", at: round3(w.start) }]);
         return {
           kind: "unknown",
-          reply: 'I can\'t detect laughter on screen yet — give me a moment instead, like "zoom at 0:12".',
+          reply: 'I can\'t detect laughter on screen yet. Give me a moment instead, like "zoom at 0:12".',
         };
       }
       const said = clause.match(/\b(?:says?|said|mentions?|mentioned)\s+(?:the\s+word\s+)?([a-z0-9]+)/);
@@ -363,12 +363,12 @@ function parseClause(text: string, ctx: IntentContext, targetClip: number): Inte
         if (w) return cmd([{ type: "zoom", at: round3(w.start) }]);
         return {
           kind: "unknown",
-          reply: `I couldn't find "${said[1]}" in this clip's transcript — give me a time instead, like "zoom at 0:12".`,
+          reply: `I couldn't find "${said[1]}" in this clip's transcript. Give me a time instead, like "zoom at 0:12".`,
         };
       }
       return {
         kind: "unknown",
-        reply: 'I can only place a zoom at a time or on a spoken word — try "zoom at 0:12" or "zoom when he says funnels".',
+        reply: 'I can only place a zoom at a time or on a spoken word. Try "zoom at 0:12" or "zoom when he says funnels".',
       };
     }
     const t = findStamp(text);
@@ -434,7 +434,7 @@ function parseClause(text: string, ctx: IntentContext, targetClip: number): Inte
     // truthfully refuse, and its summary is the authority on what happened.
     return cmd(
       [{ type: "trim", edge, seconds: -DEFAULT_RESIZE_S }],
-      `You didn't say how much — going with ${DEFAULT_RESIZE_S} seconds; say e.g. "extend the ${edge} by 4 seconds" for a different amount.`
+      `You didn't say how much, so I'm going with ${DEFAULT_RESIZE_S} seconds; say e.g. "extend the ${edge} by 4 seconds" for a different amount.`
     );
   }
   if (/\bshorter\b|\bshorten\b/.test(text)) {
@@ -442,7 +442,7 @@ function parseClause(text: string, ctx: IntentContext, targetClip: number): Inte
     if (amount !== null) return cmd([{ type: "trim", edge: "end", seconds: amount }]);
     return cmd(
       [{ type: "trim", edge: "end", seconds: DEFAULT_RESIZE_S }],
-      `You didn't say how much — going with ${DEFAULT_RESIZE_S} seconds off the end; say e.g. "make it 4 seconds shorter" for a different amount.`
+      `You didn't say how much, so I'm going with ${DEFAULT_RESIZE_S} seconds off the end; say e.g. "make it 4 seconds shorter" for a different amount.`
     );
   }
   if (/\bstart\b|\bbeginning\b|\bintro\b/.test(text) && /\blater\b|\bearlier\b|\bsooner\b|\bforward\b|\bback\b/.test(text)) {

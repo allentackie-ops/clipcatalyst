@@ -385,8 +385,8 @@ function applyTrim(base: ClipEdits, ctx: EditContext, edge: "start" | "end", sec
       edits: base,
       summary:
         edge === "start"
-          ? "The source starts there — the clip can't begin any earlier."
-          : "The source ends there — the clip can't run any later.",
+          ? "The source starts there, so the clip can't begin any earlier."
+          : "The source ends there, so the clip can't run any later.",
     };
   }
   // The clamps above ran on PRE-move keeps: a bound landing within MIN_CUT_S
@@ -401,7 +401,7 @@ function applyTrim(base: ClipEdits, ctx: EditContext, edge: "start" | "end", sec
   const out = fmt1(resolveEdits(next, ctx).outputDuration);
   const label = edge === "start" ? "Start" : "End";
   const dir = moved > 0 ? "later" : "earlier";
-  return { edits: next, summary: `${label} moved ${fmt1(Math.abs(moved))} s ${dir} — the clip is now ${out} s.` };
+  return { edits: next, summary: `${label} moved ${fmt1(Math.abs(moved))} s ${dir}. The clip is now ${out} s.` };
 }
 
 type CutAttempt = { edits: ClipEdits; removed: number } | { refused: "floor" | "small" };
@@ -427,7 +427,7 @@ function cutOnePause(base: ClipEdits, ctx: EditContext, p: Pause): Applied {
       edits: base,
       summary:
         r.refused === "small"
-          ? `The pause at ${at} is only ${fmt1(p.length)} s — too short to cut cleanly, so I left it.`
+          ? `The pause at ${at} is only ${fmt1(p.length)} s, too short to cut cleanly, so I left it.`
           : `Cutting the pause at ${at} would leave less than ${MIN_CLIP_S} s of clip, so I left it alone.`,
     };
   }
@@ -460,12 +460,12 @@ function cutMany(base: ClipEdits, ctx: EditContext, pauses: Pause[], verb: "Cut"
       summary:
         verb === "Cut"
           ? `I couldn't find a pause of ${min} s or longer to cut.`
-          : `No pauses of ${min} s or longer left — it's already tight.`,
+          : `No pauses of ${min} s or longer left. It's already tight.`,
     };
   }
   const total = n + floored;
   const head = floored > 0 ? `${verb} ${n} of ${plural(total, "pause")}` : `${verb} ${plural(n, "pause")}`;
-  return { edits: cur, summary: `${head} — saved ${fmt1(round3(saved))} s.` };
+  return { edits: cur, summary: `${head}, saving ${fmt1(round3(saved))} s.` };
 }
 
 function applyCutPause(base: ClipEdits, ctx: EditContext, which: "longest" | "all" | { at: number }): Applied {
@@ -532,13 +532,13 @@ function applyEnergetic(base: ClipEdits, ctx: EditContext): Applied {
     placed++;
   }
   if (n === 0 && placed === 0) {
-    return { edits: base, summary: "It's already tight and already zoomed — nothing more to add." };
+    return { edits: base, summary: "It's already tight and already zoomed, so there's nothing more to add." };
   }
   if (n > 0 && placed > 0) {
     return { edits: cur, summary: `Tightened ${plural(n, "pause")} and added ${placed} punch-in ${placed === 1 ? "zoom" : "zooms"}.` };
   }
   if (n > 0) {
-    return { edits: cur, summary: `Tightened ${plural(n, "pause")} — found no fresh spot for a punch-in zoom.` };
+    return { edits: cur, summary: `Tightened ${plural(n, "pause")}, but found no fresh spot for a punch-in zoom.` };
   }
   return { edits: cur, summary: `No pauses worth tightening, but added ${placed} punch-in ${placed === 1 ? "zoom" : "zooms"}.` };
 }
@@ -562,14 +562,14 @@ function applyZoom(base: ClipEdits, ctx: EditContext, cmd: { at: number; duratio
   if (base.cuts.some((c) => c.start <= zs + 1e-9 && c.end >= ze - 1e-9)) {
     return {
       edits: base,
-      summary: `${formatClipTime(cmd.at)} is inside a cut — clear the cut first or pick another time.`,
+      summary: `${formatClipTime(cmd.at)} is inside a cut. Clear the cut first, or pick another time.`,
     };
   }
   // A new zoom overlapping an old one replaces it.
   const kept = base.zooms.filter((z) => z.end <= zs + 1e-9 || z.start >= ze - 1e-9);
   const replaced = base.zooms.length - kept.length;
   if (kept.length + 1 > MAX_ZOOMS) {
-    return { edits: base, summary: `That would make more than ${MAX_ZOOMS} zooms — remove one first.` };
+    return { edits: base, summary: `That would make more than ${MAX_ZOOMS} zooms. Remove one first.` };
   }
   const next = normalizeEdits({ ...base, zooms: [...kept, { start: zs, end: ze, scale }] }, ctx);
   return {
@@ -591,12 +591,12 @@ function applyCutRange(base: ClipEdits, ctx: EditContext, s: number, e: number):
       edits: base,
       summary:
         r.refused === "small"
-          ? `That's shorter than ${MIN_CUT_S} s — too small to cut.`
+          ? `That's shorter than ${MIN_CUT_S} s, too small to cut.`
           : `That would leave less than ${MIN_CLIP_S} s of clip, so I left it alone.`,
     };
   }
   const out = fmt1(resolveEdits(r.edits, ctx).outputDuration);
-  return { edits: r.edits, summary: `Cut ${fmt1(r.removed)} s — the clip is now ${out} s.` };
+  return { edits: r.edits, summary: `Cut ${fmt1(r.removed)} s. The clip is now ${out} s.` };
 }
 
 function applyUseHook(base: ClipEdits, ctx: EditContext, index: number): Applied {
@@ -606,8 +606,8 @@ function applyUseHook(base: ClipEdits, ctx: EditContext, index: number): Applied
   const idx = clamp(wanted, 0, n - 1);
   if (idx === base.hookIndex) return { edits: base, summary: `Already using hook ${idx + 1}.` };
   const next = { ...base, hookIndex: idx };
-  if (wanted > n - 1) return { edits: next, summary: `There are only ${n} hooks — switched to hook ${idx + 1}.` };
-  if (wanted < 0) return { edits: next, summary: `Hook numbers start at 1 — switched to hook ${idx + 1}.` };
+  if (wanted > n - 1) return { edits: next, summary: `There are only ${n} hooks, so I switched to hook ${idx + 1}.` };
+  if (wanted < 0) return { edits: next, summary: `Hook numbers start at 1, so I switched to hook ${idx + 1}.` };
   return { edits: next, summary: `Switched to hook ${idx + 1} of ${n}.` };
 }
 
@@ -635,7 +635,7 @@ function dispatch(base: ClipEdits, command: EditCommand, ctx: EditContext): Appl
     case "clearCuts": {
       const n = base.cuts.length;
       if (n === 0) return { edits: base, summary: "There are no cuts to restore." };
-      return { edits: { ...base, cuts: [] }, summary: `Removed ${plural(n, "cut")} — the full clip plays again.` };
+      return { edits: { ...base, cuts: [] }, summary: `Removed ${plural(n, "cut")}. The full clip plays again.` };
     }
     case "captions": {
       const on = command.on !== false;
@@ -652,7 +652,7 @@ function dispatch(base: ClipEdits, command: EditCommand, ctx: EditContext): Appl
     }
     case "reset": {
       if (isEmptyEdits(base)) return { edits: base, summary: "There are no edits to reset." };
-      return { edits: freshEmpty(), summary: "Reset — back to the original clip." };
+      return { edits: freshEmpty(), summary: "Reset. Back to the original clip." };
     }
     default:
       return { edits: base, summary: "I don't recognize that command, so nothing changed." };

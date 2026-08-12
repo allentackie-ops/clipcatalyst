@@ -352,8 +352,10 @@ const SECTIONS: DocSection[] = [
             <>
               <Em>We delete automatically</Em>: an uploaded source, as soon as
               its job finishes; a job record and the clips attached to it, 48
-              hours after the job was created; a saved clip&apos;s video file at
-              the end of your plan&apos;s retention window — the clip&apos;s
+              hours after the job was created; the record of a finished post to a
+              channel, 48 hours after you asked for it, which leaves the video
+              itself on your channel; a saved clip&apos;s video file at the end
+              of your plan&apos;s retention window, after which the clip&apos;s
               details stay so your library still lists it.
             </>,
             <>

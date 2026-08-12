@@ -111,7 +111,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
   ok("all three pauses cut", eq(edits.cuts, [
     { start: 1.62, end: 2.58 }, { start: 3.42, end: 3.65 }, { start: 6.12, end: 6.68 },
   ]), JSON.stringify(edits.cuts));
-  ok("cutPause all summary", summary === "Cut 3 pauses — saved 1.8 s.", summary);
+  ok("cutPause all summary", summary === "Cut 3 pauses, saving 1.8 s.", summary);
   ok("output after all cuts", resolveEdits(edits, ctx).outputDuration === 24.55, `${resolveEdits(edits, ctx).outputDuration}`);
   ok("cutPause all again is a truthful no-op",
     applyCommand(edits, { type: "cutPause", which: "all" }, ctx).summary === "I couldn't find a pause of 0.45 s or longer to cut.");
@@ -121,7 +121,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
 {
   const { edits, summary } = run([{ type: "tighten" }]);
   ok("tighten cuts only A and D", eq(edits.cuts, [{ start: 1.62, end: 2.58 }, { start: 6.12, end: 6.68 }]), JSON.stringify(edits.cuts));
-  ok("tighten summary", summary === "Tightened 2 pauses — saved 1.5 s.", summary);
+  ok("tighten summary", summary === "Tightened 2 pauses, saving 1.5 s.", summary);
 }
 
 // 9. cutPause {at}: containing or nearest within 1.0 s, else truthful no-op.
@@ -150,18 +150,18 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
 // 11. Trim: summaries, both source bounds, and the MIN_CLIP_S floor.
 {
   const t = run([{ type: "trim", edge: "start", seconds: 2 }]);
-  ok("trim start summary", t.summary === "Start moved 2.0 s later — the clip is now 24.3 s.", t.summary);
+  ok("trim start summary", t.summary === "Start moved 2.0 s later. The clip is now 24.3 s.", t.summary);
 
   const ext = run([{ type: "trim", edge: "start", seconds: -15 }]);
   ok("extend start clamps at source 0", ext.edits.startDelta === -10, `${ext.edits.startDelta}`);
-  ok("extend start summary", ext.summary === "Start moved 10.0 s earlier — the clip is now 36.3 s.", ext.summary);
+  ok("extend start summary", ext.summary === "Start moved 10.0 s earlier. The clip is now 36.3 s.", ext.summary);
   const ext2 = applyCommand(ext.edits, { type: "trim", edge: "start", seconds: -1 }, ctx);
-  ok("further extension truthfully refused", ext2.summary === "The source starts there — the clip can't begin any earlier.");
+  ok("further extension truthfully refused", ext2.summary === "The source starts there, so the clip can't begin any earlier.");
   ok("refusal leaves edits alone", eq(ext2.edits, ext.edits));
 
   const late = run([{ type: "trim", edge: "end", seconds: -40 }]);
   ok("extend end clamps at source duration", late.edits.endDelta === 23.7, `${late.edits.endDelta}`);
-  ok("extend end summary", late.summary === "End moved 23.7 s later — the clip is now 50.0 s.", late.summary);
+  ok("extend end summary", late.summary === "End moved 23.7 s later. The clip is now 50.0 s.", late.summary);
 
   const floor = run([{ type: "trim", edge: "end", seconds: 40 }]);
   ok("trim end clamps at the 3 s floor", floor.edits.endDelta === -23.3, `${floor.edits.endDelta}`);
@@ -197,7 +197,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
   ok("cut past both bounds refused", wild.edits.cuts.length === 0);
   const tiny = run([{ type: "cut", start: 5, end: 5.1 }]);
   ok("cut under MIN_CUT_S refused", tiny.edits.cuts.length === 0);
-  ok("tiny-cut refusal wording", tiny.summary === "That's shorter than 0.2 s — too small to cut.", tiny.summary);
+  ok("tiny-cut refusal wording", tiny.summary === "That's shorter than 0.2 s, too small to cut.", tiny.summary);
 }
 
 // 14. Zoom: defaults, clamps, bounds clipping, replacement, MAX_ZOOMS.
@@ -225,7 +225,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
   ok("six zooms allowed", six.edits.zooms.length === 6);
   const seven = applyCommand(six.edits, { type: "zoom", at: 20 }, ctx);
   ok("seventh zoom refused", seven.edits.zooms.length === 6);
-  ok("MAX_ZOOMS wording", seven.summary === "That would make more than 6 zooms — remove one first.", seven.summary);
+  ok("MAX_ZOOMS wording", seven.summary === "That would make more than 6 zooms. Remove one first.", seven.summary);
 }
 
 // 15. Normalize: a zoom fully inside a later cut is dropped.
@@ -405,7 +405,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
 
   const clampHi = run([{ type: "useHook", index: 99 }]);
   ok("useHook clamps to hooks.length-1", clampHi.edits.hookIndex === 2);
-  ok("useHook clamp is truthful", clampHi.summary === "There are only 3 hooks — switched to hook 3.", clampHi.summary);
+  ok("useHook clamp is truthful", clampHi.summary === "There are only 3 hooks, so I switched to hook 3.", clampHi.summary);
   const pick = run([{ type: "useHook", index: 1 }]);
   ok("useHook picks", pick.edits.hookIndex === 1 && pick.summary === "Switched to hook 2 of 3.");
   const cycle = run([{ type: "useHook", index: 2 }, { type: "cycleHook" }]);
@@ -425,7 +425,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
     { type: "captions", on: false },
   ]);
   const r = applyCommand(edits, { type: "reset" }, ctx);
-  ok("reset returns EMPTY_EDITS", isEmptyEdits(r.edits) && r.summary === "Reset — back to the original clip.");
+  ok("reset returns EMPTY_EDITS", isEmptyEdits(r.edits) && r.summary === "Reset. Back to the original clip.");
   ok("reset on empty is truthful", applyCommand(EMPTY_EDITS, { type: "reset" }, ctx).summary === "There are no edits to reset.");
 
   const cz = applyCommand(edits, { type: "clearZooms" }, ctx);
@@ -443,7 +443,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
 {
   const ctxA = { planStart: 12, planEnd: 40, sourceDuration: 60, words: [], hooks: [] };
   const head = run([{ type: "cut", start: 0, end: 2 }], EMPTY_EDITS, ctxA);
-  ok("head-abutting cut summary", head.summary === "Cut 2.0 s — the clip is now 26.0 s.", head.summary);
+  ok("head-abutting cut summary", head.summary === "Cut 2.0 s. The clip is now 26.0 s.", head.summary);
   const rHead = resolveEdits(head.edits, ctxA);
   ok("head-abutting cut folds start", eq(
     { start: rHead.start, end: rHead.end, keeps: rHead.keeps, outputDuration: rHead.outputDuration },
@@ -533,7 +533,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
 //     destroy a surviving zoom first (review finding B).
 {
   const b1 = run([{ type: "cut", start: 4, end: 8 }, { type: "zoom", at: 5 }]);
-  ok("zoom inside a cut refused", b1.summary === "0:05 is inside a cut — clear the cut first or pick another time.", b1.summary);
+  ok("zoom inside a cut refused", b1.summary === "0:05 is inside a cut. Clear the cut first, or pick another time.", b1.summary);
   ok("refusal adds no zoom", b1.edits.zooms.length === 0, JSON.stringify(b1.edits.zooms));
   ok("refusal keeps the cut", eq(b1.edits.cuts, [{ start: 4, end: 8 }]), JSON.stringify(b1.edits.cuts));
 
@@ -542,7 +542,7 @@ ok("MAX_ZOOMS = 6", MAX_ZOOMS === 6);
     { type: "zoom", at: 7, duration: 2 }, // straddles the cut edge — survives
     { type: "zoom", at: 5.5 }, // fully inside the cut — must refuse
   ]);
-  ok("in-cut replace refused truthfully", b2.summary === "0:06 is inside a cut — clear the cut first or pick another time.", b2.summary);
+  ok("in-cut replace refused truthfully", b2.summary === "0:06 is inside a cut. Clear the cut first, or pick another time.", b2.summary);
   ok("surviving zoom not destroyed by the refused replace", eq(b2.edits.zooms, [{ start: 7, end: 9, scale: 1.28 }]), JSON.stringify(b2.edits.zooms));
 }
 

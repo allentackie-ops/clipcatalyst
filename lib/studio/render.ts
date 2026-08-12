@@ -420,7 +420,7 @@ export async function renderClip(
     await waitForEvent(video, "loadedmetadata", METADATA_TIMEOUT_MS, () => video.readyState >= 1);
     if (mediaFailed || video.readyState < 1) {
       throw new Error(
-        "Couldn't load this video for rendering — the format may not be playable in your browser."
+        "Couldn't load this video for rendering. The format may not be playable in your browser."
       );
     }
 
@@ -457,7 +457,7 @@ export async function renderClip(
     }
     if (audioCtx.state !== "running") {
       throw new Error(
-        "Your browser paused audio processing, so the clip's sound can't be captured. Click again to retry — or use Chrome, Edge, or Firefox."
+        "Your browser paused audio processing, so the clip's sound can't be captured. Click again to retry, or use Chrome, Edge, or Firefox."
       );
     }
     try {
@@ -483,7 +483,7 @@ export async function renderClip(
       );
     } catch {
       throw new Error(
-        "Your browser couldn't start a video recorder for this quality — try a lower quality setting."
+        "Your browser couldn't start a video recorder for this quality. Try a lower quality setting."
       );
     }
 
@@ -783,7 +783,7 @@ export async function renderClip(
       // Cuts add a seek each — the budget covers the SOURCE span plus one
       // seek allowance per keep segment.
       const watchdog = setTimeout(() => {
-        finish(new Error("Rendering timed out — the video stopped playing back."));
+        finish(new Error("Rendering timed out. The video stopped playing back."));
       }, clipDuration * 3000 + 30_000 + (keeps ? keeps.length * 2000 : 0));
       const reachedEnd = () => video.currentTime >= endTarget || video.ended;
       const drawNow = () => {
@@ -938,7 +938,7 @@ export async function renderClip(
     const blob = new Blob(chunks, { type: mimeType });
     if (blob.size === 0) {
       throw new Error(
-        "Rendering produced an empty file — your browser may not support recording at this quality. Try a lower quality or a Chromium-based browser."
+        "Rendering produced an empty file. Your browser may not support recording at this quality, so try a lower quality or a Chromium-based browser."
       );
     }
     onProgress?.(1);

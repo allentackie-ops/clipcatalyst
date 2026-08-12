@@ -23,7 +23,7 @@ const onModelProgress = (p: any) => {
     post({
       type: "model-progress",
       progress: Math.min(p.progress / 100, 1),
-      detail: `Downloading AI model — ${String(p.file ?? "").split("/").pop() ?? "weights"}`,
+      detail: `Downloading AI model: ${String(p.file ?? "").split("/").pop() ?? "weights"}`,
     });
   }
 };

@@ -102,7 +102,7 @@ function warnOnce(error: unknown): void {
   if (warned) return;
   warned = true;
   console.warn(
-    "[ClipCatalyst] Face tracking is unavailable — clips will use a centered crop.",
+    "[ClipCatalyst] Face tracking is unavailable, so clips will use a centered crop.",
     error
   );
 }

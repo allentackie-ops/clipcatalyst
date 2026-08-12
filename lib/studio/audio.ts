@@ -38,31 +38,31 @@ const SILENCE_MERGE_GAP_SECONDS = 0.1;
 /** The browser can't open the file either — a genuine file problem. */
 const FILE_UNREADABLE_MESSAGE =
   "Couldn't read this file's audio. The video may use an unsupported codec, " +
-  "be DRM-protected, or contain no audio track — try re-exporting it as a " +
+  "be DRM-protected, or contain no audio track. Try re-exporting it as a " +
   "standard MP4 (H.264 video + AAC audio).";
 
 /** The browser played the file but won't decode its audio (WebKit/iOS). */
 const BROWSER_LIMIT_MESSAGE =
-  "This browser can't extract audio from video files — Studio's on-device " +
+  "This browser can't extract audio from video files, so Studio's on-device " +
   "engine needs Chrome, Edge, or Firefox on a desktop. Your video is fine: " +
   "this browser opened and played it, it just won't hand the audio track to " +
   "the page.";
 
 /** The file opened and the browser positively reports no audio track. */
 const NO_AUDIO_TRACK_MESSAGE =
-  "This video plays, but the browser reports no audio track in it — Studio " +
+  "This video plays, but the browser reports no audio track in it, and Studio " +
   "needs speech to find clips. If you're sure it has sound, re-export it as " +
   "a standard MP4 (H.264 video + AAC audio) and try again.";
 
 /** The probe itself gave no answer — say so instead of guessing. */
 const INCONCLUSIVE_MESSAGE =
   "Couldn't read this file's audio, and this browser wouldn't say why. Try " +
-  "re-exporting it as a standard MP4 (H.264 video + AAC audio) — or open " +
+  "re-exporting it as a standard MP4 (H.264 video + AAC audio), or open " +
   "Studio in Chrome, Edge, or Firefox on a desktop.";
 
 /** The file could not be read off disk at all (moved, or still syncing). */
 const FILE_GONE_MESSAGE =
-  "Couldn't read that file off disk — it may have been moved, renamed, or " +
+  "Couldn't read that file off disk. It may have been moved, renamed, or " +
   "still be syncing from cloud storage. Pick it again.";
 
 function memoryMessage(bytes: number): string {
@@ -262,7 +262,7 @@ export async function decodeToMono16k(
     );
   }
   if (file.size === 0) {
-    throw new Error("That file is empty — pick a video that contains audio.");
+    throw new Error("That file is empty. Pick a video that contains audio.");
   }
 
   // Reading a File into an ArrayBuffer has no granular progress events worth

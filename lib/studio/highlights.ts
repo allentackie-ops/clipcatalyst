@@ -635,30 +635,30 @@ function makeTip(
   const liabilities = [
     {
       value: WEIGHTS.hook * (1 - score.hook.score),
-      tip: "Punch up the first line — open on a question or a bold claim so nobody scrolls past.",
+      tip: "Punch up the first line. Open on a question or a bold claim so nobody scrolls past.",
     },
     {
       value: WEIGHTS.density * (1 - score.density),
-      tip: "Tighten the wording — cutting filler raises ideas-per-second, and that holds attention.",
+      tip: "Tighten the wording. Cutting filler raises ideas-per-second, and that holds attention.",
     },
     {
       value: WEIGHTS.energy * (1 - score.energy),
-      tip: "The delivery sits flat here — pick a take with more vocal punch, or add cuts for pace.",
+      tip: "The delivery sits flat here. Pick a take with more vocal punch, or add cuts for pace.",
     },
     {
       value: WEIGHTS.completeness * (1 - score.completeness),
-      tip: "It cuts off mid-thought — end on a finished sentence so the clip feels complete.",
+      tip: "It cuts off mid-thought. End on a finished sentence so the clip feels complete.",
     },
     {
       value: WEIGHTS.coldOpen * score.coldOpen,
-      tip: "This starts inside the intro — skip the warm-up and open where the story begins.",
+      tip: "This starts inside the intro. Skip the warm-up and open where the story begins.",
     },
   ];
   const pause = longestPauseIn(silences, start, end);
   if (pause) {
     liabilities.push({
       value: WEIGHTS.pause * score.pause + (pause.length >= 0.7 ? 0.02 : 0),
-      tip: `Trim the pause at ${formatClipTime(pause.at - start)} — dead air is retention poison.`,
+      tip: `Trim the pause at ${formatClipTime(pause.at - start)}. Dead air is retention poison.`,
     });
   }
   liabilities.sort((a, b) => b.value - a.value);

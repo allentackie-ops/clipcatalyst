@@ -193,6 +193,29 @@ def _expire_code(email: str) -> None:
         )
 
 
+class _Clock:
+    """A pinned minute that can be stepped without ever leaving its hour.
+
+    The per-address window is an HOUR, but any test that fires more than
+    RATE_LIMIT_PER_MINUTE starts trips the per-CLIENT limiter first and would
+    measure that instead. Stepping the minute between requests gives every
+    request a fresh client window while the hour under test stands still, so
+    what a 429 means is never ambiguous. Both counters read `_current_minute`
+    (the hour is derived from it), so replacing this one callable pins both.
+    """
+
+    def __init__(self, hour: int) -> None:
+        self._hour = hour
+        self._minute = hour * 60
+
+    def __call__(self) -> int:
+        return self._minute
+
+    def tick(self) -> None:
+        self._minute += 1
+        assert self._minute // 60 == self._hour, "the test walked into a new hour"
+
+
 # --------------------------------------------------------------------------- #
 # 1. The round trip, and what it does to the users table.
 # --------------------------------------------------------------------------- #
@@ -580,6 +603,233 @@ def test_the_per_address_cap_is_configurable(
         assert _start(sandbox.client).status_code == 429
     finally:
         _set_env(CC_EMAIL_CODE_PER_HOUR=None)
+
+
+# Eighteen strings, ONE Gmail inbox. Every one of them is a spelling Gmail
+# itself throws away on delivery, so a stranger who owns none of them can put
+# eighteen pieces of mail in somebody's inbox — which is the mail-bombing the
+# per-address cap exists to stop, and which it did not stop while it counted
+# the identity form of the address.
+_ONE_GMAIL_MAILBOX = (
+    # Twelve sub-addresses (RFC 5233): Gmail strips everything from the `+`.
+    *[f"alexcreator+{tag}@gmail.com" for tag in range(1, 13)],
+    # Four placements of dots in the local part, which Gmail ignores.
+    "a.lexcreator@gmail.com",
+    "al.excreator@gmail.com",
+    "alex.creator@gmail.com",
+    "alexcreato.r@gmail.com",
+    # Two root-anchored spellings of the same host — the trailing dot is DNS
+    # punctuation, not part of the name.
+    "alexcreator@gmail.com.",
+    "alexcreator+late@gmail.com.",
+)
+
+
+def test_one_gmail_mailbox_cannot_be_bombed_by_respelling_the_address(
+    sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap counts an INBOX, so retyping the address does not buy more.
+
+    The whole purpose EMAILAUTH.md gives this limit — "nobody can be mail-
+    bombed by someone typing their address repeatedly" — is only true if the
+    bucket is the mailbox. Keyed on the address as typed, one Gmail mailbox
+    has unbounded distinct keys and the cap never fires once.
+    """
+    from clipcatalyst_api import auth
+    from clipcatalyst_api.settings import get_settings
+
+    clock = _Clock(380)
+    monkeypatch.setattr(auth, "_current_minute", clock)
+    per_hour = get_settings().email_code_per_hour
+    assert per_hour == 5
+    assert len(_ONE_GMAIL_MAILBOX) == 18
+
+    # One inbox by deliverability; eighteen distinct strings by identity. Both
+    # halves matter — see mailbox_key on why they are different questions.
+    assert len({auth.mailbox_key(a) for a in _ONE_GMAIL_MAILBOX}) == 1
+    assert len({auth.normalize_email(a) for a in _ONE_GMAIL_MAILBOX}) == 18
+
+    statuses = []
+    for address in _ONE_GMAIL_MAILBOX:
+        clock.tick()  # a fresh CLIENT minute, so only the hour window is tested
+        statuses.append(_start(sandbox.client, address).status_code)
+
+    assert statuses[:per_hour] == [200] * per_hour
+    assert set(statuses[per_hour:]) == {429}, statuses
+    assert statuses.count(200) == per_hour
+    # Five codes minted and five rows staged — not eighteen. The refusals cost
+    # the attacker the send, not merely the response.
+    assert len(sandbox.codes) == per_hour
+    assert len(_code_rows()) == per_hour
+
+
+def test_a_tag_a_dotted_local_part_and_a_trailing_dot_each_share_the_budget(
+    sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each folding rule on its own, against its own base address.
+
+    Separate base mailboxes so no rule can pass on another's spent budget.
+    """
+    from clipcatalyst_api import auth
+    from clipcatalyst_api.settings import get_settings
+
+    clock = _Clock(381)
+    monkeypatch.setattr(auth, "_current_minute", clock)
+    per_hour = get_settings().email_code_per_hour
+
+    for base, variant in (
+        ("boxone@gmail.com", "boxone+newsletter@gmail.com"),
+        ("boxtwo@gmail.com", "b.o.x.t.w.o@gmail.com"),
+        ("boxthree@gmail.com", "boxthree@gmail.com."),
+    ):
+        assert auth.mailbox_key(variant) == auth.mailbox_key(base)
+        for _ in range(per_hour):
+            clock.tick()
+            assert _start(sandbox.client, base).status_code == 200
+        clock.tick()
+        refused = _start(sandbox.client, variant)
+        assert refused.status_code == 429, f"{variant} bought a fresh budget"
+
+
+def test_googlemail_is_the_same_mailbox_as_gmail(
+    sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Google's second name for one inbox, folded to the first."""
+    from clipcatalyst_api import auth
+    from clipcatalyst_api.settings import get_settings
+
+    clock = _Clock(382)
+    monkeypatch.setattr(auth, "_current_minute", clock)
+    per_hour = get_settings().email_code_per_hour
+
+    assert auth.mailbox_key("boxfour@googlemail.com") == "boxfour@gmail.com"
+    # And the alias carries the other rules with it, in either spelling.
+    assert auth.mailbox_key("b.ox.four+tag@googlemail.com.") == "boxfour@gmail.com"
+
+    for _ in range(per_hour):
+        clock.tick()
+        assert _start(sandbox.client, "boxfour@googlemail.com").status_code == 200
+    clock.tick()
+    assert _start(sandbox.client, "boxfour@gmail.com").status_code == 429
+
+
+def test_dots_are_significant_for_a_domain_that_has_not_said_otherwise(
+    sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Over-merging has a victim too, so the dot rule is an allow-list.
+
+    `alex.smith@fastmail.com` and `alexsmith@fastmail.com` are two people's
+    inboxes there. Folding them would let either one spend the other's hourly
+    allowance and deny a stranger their sign-in mail — a denial of service
+    built out of the anti-denial-of-service.
+    """
+    from clipcatalyst_api import auth
+    from clipcatalyst_api.settings import get_settings
+
+    clock = _Clock(383)
+    monkeypatch.setattr(auth, "_current_minute", clock)
+    per_hour = get_settings().email_code_per_hour
+    dotted, undotted = "alex.smith@fastmail.com", "alexsmith@fastmail.com"
+    assert auth.mailbox_key(dotted) != auth.mailbox_key(undotted)
+
+    for _ in range(per_hour):
+        clock.tick()
+        assert _start(sandbox.client, dotted).status_code == 200
+    clock.tick()
+    assert _start(sandbox.client, dotted).status_code == 429
+
+    # The other mailbox is untouched: a whole allowance of its own, and its
+    # own refusal at the end of it.
+    for _ in range(per_hour):
+        clock.tick()
+        assert _start(sandbox.client, undotted).status_code == 200
+    clock.tick()
+    assert _start(sandbox.client, undotted).status_code == 429
+
+
+def test_mailbox_key_folds_deliverability_and_never_identity(
+    sandbox: SimpleNamespace,
+) -> None:
+    """The two questions, side by side, on the same strings."""
+    from clipcatalyst_api import auth
+
+    cases = {
+        "alex@gmail.com": "alex@gmail.com",
+        "  Alex+Work@GMail.com  ": "alex@gmail.com",
+        "a.l.e.x@gmail.com": "alex@gmail.com",
+        "alex@gmail.com.": "alex@gmail.com",
+        "a.l.e.x+tag@googlemail.com.": "alex@gmail.com",
+        # Sub-addressing is stripped everywhere; dots are kept everywhere the
+        # provider has not documented ignoring them.
+        "alex.smith+news@fastmail.com": "alex.smith@fastmail.com",
+        "alex.smith@fastmail.com.": "alex.smith@fastmail.com",
+        # A local part that is nothing BUT a tag would fold to an empty key
+        # and pool unrelated strings; it is left exactly as typed instead.
+        "+promo@gmail.com": "+promo@gmail.com",
+        # Two trailing dots is an empty DNS label — not a deliverable host,
+        # and not this mailbox. Exactly one is the root-anchored spelling.
+        "alex@gmail.com..": "alex@gmail.com.",
+        # Never a parser: anything that is not address-shaped is its own key.
+        "not-an-address": "not-an-address",
+    }
+    for typed, expected in cases.items():
+        assert auth.mailbox_key(typed) == expected, typed
+
+    # And none of that folding reaches identity, which still answers only to
+    # case and whitespace.
+    assert auth.normalize_email("  Alex+Work@GMail.com  ") == "alex+work@gmail.com"
+    assert auth.normalize_email("a.l.e.x@gmail.com") == "a.l.e.x@gmail.com"
+    assert auth.normalize_email("alex@googlemail.com") == "alex@googlemail.com"
+
+
+def test_two_addresses_in_one_mailbox_are_still_two_separate_accounts(
+    sandbox: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safety direction: folding stops at the counter.
+
+    People use plus-addressing deliberately to keep separate accounts on one
+    inbox. If the delivery key ever became the identity key, a code minted for
+    one of those accounts would sign into the other — so `verify` must go on
+    resolving the address exactly as typed.
+    """
+    from clipcatalyst_api import auth
+    from clipcatalyst_api.settings import get_settings
+
+    clock = _Clock(384)
+    monkeypatch.setattr(auth, "_current_minute", clock)
+    client = sandbox.client
+    work, personal = "alex+work@gmail.com", "alex@gmail.com"
+    assert auth.mailbox_key(work) == auth.mailbox_key(personal)  # one inbox
+    assert auth.normalize_email(work) != auth.normalize_email(personal)  # two rows
+
+    assert _start(client, work).status_code == 200
+    work_code = sandbox.codes[-1]
+    # The code was minted for ONE address: the other has no row to read and no
+    # digest this code could match, so it is the same generic 401 as ever.
+    assert _verify(client, personal, work_code).status_code == 401
+    assert _users() == []
+
+    signed_in_work = _verify(client, work, work_code)
+    assert signed_in_work.status_code == 200, signed_in_work.text
+    assert signed_in_work.json()["user"]["email"] == work
+
+    clock.tick()
+    assert _start(client, personal).status_code == 200
+    signed_in_personal = _verify(client, personal, sandbox.codes[-1])
+    assert signed_in_personal.status_code == 200, signed_in_personal.text
+    assert signed_in_personal.json()["user"]["email"] == personal
+    assert (
+        signed_in_personal.json()["user"]["id"] != signed_in_work.json()["user"]["id"]
+    )
+    assert sorted(row["email"] for row in _users()) == sorted([work, personal])
+
+    # Two accounts, but one inbox and therefore one allowance: those two starts
+    # came out of the same five.
+    for _ in range(get_settings().email_code_per_hour - 2):
+        clock.tick()
+        assert _start(client, work).status_code == 200
+    clock.tick()
+    assert _start(client, personal).status_code == 429
 
 
 def test_the_per_client_limiter_applies_to_both_routes(

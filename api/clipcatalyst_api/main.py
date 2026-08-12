@@ -816,8 +816,13 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 status_code=400,
                 detail="That doesn't look like a valid email address.",
             )
-        # Per ADDRESS: nobody can be mail-bombed by a stranger typing their
-        # address over and over, however many machines it comes from.
+        # Per MAILBOX: nobody can be mail-bombed by a stranger typing their
+        # address over and over, however many machines it comes from — and
+        # however many ways they spell it, since one inbox answers to every
+        # `+tag`, and to dotted and trailing-dot variants (auth.mailbox_key).
+        # That folding is for the COUNTER only. `email` below stays the
+        # identity form, so `alex+work@` and `alex@` remain separate accounts
+        # with separate codes; the two must not be collapsed into one notion.
         auth.enforce_email_code_limit(email)
 
         code = auth.new_login_code()

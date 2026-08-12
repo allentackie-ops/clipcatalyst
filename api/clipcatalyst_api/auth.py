@@ -51,11 +51,82 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def normalize_email(email: str) -> str:
+    """The IDENTITY form: the string an account is keyed on.
+
+    Case and surrounding whitespace are typing, not identity, so they are
+    flattened — and nothing else is. In particular ``alex+work@gmail.com`` and
+    ``alex@gmail.com`` stay two different accounts here. See ``mailbox_key``
+    below, and the paragraph in it about why these two functions must not be
+    merged.
+    """
     return email.strip().lower()
 
 
 def is_valid_email(email: str) -> bool:
     return len(email) <= 254 and bool(_EMAIL_RE.match(email))
+
+
+#: Domains whose mail servers ignore dots in the local part, so that
+#: ``a.lex@gmail.com`` and ``alex@gmail.com`` reach one inbox. An allow-list,
+#: never a rule applied to every domain: plenty of providers treat dots as
+#: significant, and folding them there would let one person's hourly cap refuse
+#: mail to a genuinely different human's mailbox.
+_DOT_INSENSITIVE_DOMAINS = frozenset({"gmail.com"})
+
+#: Domains that are another domain's second name on the wire. Google's own
+#: alias, so it is folded before the dot rule above is consulted.
+_DOMAIN_ALIASES = {"googlemail.com": "gmail.com"}
+
+
+def mailbox_key(email: str) -> str:
+    """The DELIVERABILITY form: which INBOX an address lands in.
+
+    IDENTITY AND DELIVERABILITY ARE TWO DIFFERENT QUESTIONS, and this function
+    answers only the second. Do not merge it with ``normalize_email``, and do
+    not "simplify" either one into the other — they disagree on purpose, and
+    the disagreement is the point:
+
+    * ``normalize_email`` answers "WHICH ACCOUNT is this?", and its answer keys
+      the users table, the login_codes row and the code digest. Plus-addressing
+      is something people use deliberately to hold separate accounts on one
+      mailbox, so ``alex+work@gmail.com`` is not ``alex@gmail.com`` — folding
+      them would let a code minted for one sign into the other, which is the
+      worst class of bug this file can have.
+    * ``mailbox_key`` answers "WHOSE INBOX does this fill up?", and its answer
+      is used for exactly one thing: the per-address hourly cap in
+      ``enforce_email_code_limit``. That cap exists so nobody can be mail-
+      bombed by a stranger typing their address over and over (EMAILAUTH.md).
+      Counted on the identity form it was decoration: one Gmail mailbox has
+      unbounded distinct spellings — every ``+tag``, every placement of dots in
+      the local part, a trailing dot on the domain — so an attacker simply
+      never reused a string and never met the cap.
+
+    The folding is deliberately conservative, because over-merging has a victim
+    too: two people who share a key share an allowance, and one of them can
+    then deny the other their sign-in mail. So only rules that are TRUE of the
+    receiving mail server are applied — a single trailing dot on the domain
+    (the same host, spelled absolutely), a ``+tag`` (RFC 5233 sub-addressing,
+    which the providers that implement it all strip), and dots in the local
+    part ONLY for the domains listed above, which document ignoring them.
+    Everything else is left exactly as typed; an unknown domain's dots are
+    significant until proven otherwise.
+    """
+    normalized = normalize_email(email)
+    local, separator, domain = normalized.rpartition("@")
+    if not separator:
+        return normalized  # not an address shape; count the string as given
+    if domain.endswith("."):
+        domain = domain[:-1]  # the root-anchored spelling of the same host
+    domain = _DOMAIN_ALIASES.get(domain, domain)
+    tagless = local.partition("+")[0]
+    # A local part that is ONLY a tag ("+promo@gmail.com") folds to nothing,
+    # and an empty key would pool every such string into one bucket. Keep the
+    # address as typed instead: refusing to guess is the safe direction.
+    if tagless:
+        local = tagless
+    if domain in _DOT_INSENSITIVE_DOMAINS:
+        local = local.replace(".", "")
+    return f"{local}@{domain}"
 
 
 def normalize_password(password: str) -> str:
@@ -680,13 +751,18 @@ def enforce_email_code_limit(email: str) -> None:
     many addresses they send from. Neither limit substitutes for the other and
     removing either leaves a real attack open.
 
-    Counted against the NORMALIZED address, so " Creator@Gmail.com " and
-    "creator@gmail.com" are one bucket rather than two — otherwise the limit
-    would be a formatting exercise.
+    Counted against the MAILBOX (``mailbox_key``), not against the account
+    identity: what is being protected here is an inbox, and one inbox answers
+    to unboundedly many spellings — " Creator@Gmail.com ", "creator+1@…",
+    "cr.eator@…", "creator@gmail.com." all fill the same one. Keyed on the
+    identity form, the cap was a formatting exercise an attacker skipped by
+    never repeating a string. The identity form is still what the code row,
+    the digest and the account lookup use — see ``mailbox_key`` for why those
+    two questions have to keep separate answers.
     """
     settings = get_settings()
     count = _count_attempt(
-        normalize_email(email),
+        mailbox_key(email),
         _EMAIL_CODE_ROUTE,
         _current_hour(),
         prefix=_HOUR_KEY_PREFIX,

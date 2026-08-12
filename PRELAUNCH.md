@@ -62,10 +62,44 @@ make them true.
 - **"Intelligent caching"** (Speed) — no cache exists in either engine.
 - **FAQ ownership answer** — claims an aggregate-training opt-out and server-side project deletion; neither exists.
 
-## 4. Sequencing
+## 4. A domain
 
-1. **RunPod box** — the cloud engine has never run on a GPU. Everything in the cloud column of the site is untested against real hardware.
-2. **Stripe keys** — billing is built and hardened (281 tests); it needs three price IDs and a webhook secret to charge.
-3. Then the items in §1 that you actually want in v1 — the rest move to a roadmap section.
-4. Then measure the real numbers in §2 and publish those.
-5. Then §3, which is a copy pass.
+The site currently lives at `allentackie-ops.github.io/clipcatalyst`. Buying a
+domain is not cosmetic — four separate things are waiting on it:
+
+- **Email deliverability.** Sign-in codes send from `onboarding@resend.dev`
+  until a domain is verified with Resend. That is a shared address, so a share
+  of codes will land in spam — and a sign-in code in a spam folder is a lost
+  customer, not an inconvenience. This is the one that breaks the product.
+- **The API.** The RunPod box answers on `<pod-id>-8000.proxy.runpod.net`,
+  which changes if the pod is ever resized or recreated. `api.<domain>` means
+  the box can move without rebuilding the site.
+- **Google sign-in.** The OAuth client's authorized origin must match the
+  site's origin exactly, so configuring it against github.io means redoing it
+  later.
+- **Charging money.** $19–$99/month against a `github.io` URL reads as a side
+  project at exactly the moment someone is deciding whether to trust it.
+
+When it exists, the wiring is: a `CNAME` file plus DNS for Pages;
+`metadataBase` in `app/layout.tsx` (hardcoded to github.io today, and wrong
+link previews are silent); `CC_CORS_ORIGINS` on the API; Google's authorized
+origins; and Resend's DNS records. Roughly fifteen minutes of config.
+
+`.com` may be gone; `.app` and `.video` read fine for this and cost less than
+`.io`/`.ai`. Cloudflare sells at cost and its DNS is what you would want
+anyway.
+
+## 5. Sequencing
+
+1. **RunPod box** — the cloud engine has never run on a GPU. Everything in
+   the cloud column of the site is untested against real hardware, and until
+   it exists the account page correctly says accounts aren't live: sign-in,
+   plans, billing and the library all live on that server.
+2. **Domain** (§4) — before Google sign-in is configured and before sign-in
+   codes are sent to anyone real, so neither has to be redone.
+3. **Stripe keys** — billing is built and hardened; it needs three price IDs
+   and a webhook secret to charge.
+4. Then the items in §1 that you actually want in v1 — the rest move to a
+   roadmap section.
+5. Then measure the real numbers in §2 and publish those.
+6. Then §3, which is a copy pass.

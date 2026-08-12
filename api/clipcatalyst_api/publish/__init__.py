@@ -50,7 +50,7 @@ CLIP_EXPIRED = (
 )
 CLIP_UNKNOWN = "That clip is no longer in your library."
 CONNECTION_GONE = (
-    "That channel was disconnected before this post started — connect it again "
+    "That channel was disconnected before this post started. Connect it again "
     "from your account page and try once more."
 )
 
@@ -66,7 +66,7 @@ def not_connected(label: str) -> str:
 def unsupported(label: str) -> str:
     """What to say for a platform ClipCatalyst knows but cannot post to."""
     return (
-        f"ClipCatalyst can't post to {label} yet — use the share button on a "
+        f"ClipCatalyst can't post to {label} yet. Use the share button on a "
         "clip to post it from your phone."
     )
 

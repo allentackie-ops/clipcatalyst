@@ -45,8 +45,8 @@ def get_transcriber(settings: Settings) -> Transcriber:
     if settings.transcriber == "faster-whisper":
         return FasterWhisperTranscriber(settings)
     raise TranscribeError(
-        f"Unknown transcriber {settings.transcriber!r} — "
-        "set CC_TRANSCRIBER to 'faster-whisper' or 'fake'."
+        f"Unknown transcriber {settings.transcriber!r}. "
+        "Set CC_TRANSCRIBER to 'faster-whisper' or 'fake'."
     )
 
 
@@ -91,7 +91,7 @@ class FasterWhisperTranscriber:
                     on_progress(min(1.0, float(segment.end) / total))
         except Exception as exc:  # ctranslate2/PyAV raise plain RuntimeErrors
             raise TranscribeError(
-                "Transcription failed — the file's audio could not be decoded."
+                "Transcription failed. The file's audio could not be decoded."
             ) from exc
 
         if on_progress is not None:
@@ -224,7 +224,7 @@ def extract_audio_features(path: str | Path, settings: Settings) -> AudioFeature
     if proc.wait() != 0:
         raise TranscribeError(
             "Couldn't read this file's audio. The video may use an unsupported "
-            "codec or contain no audio track — try re-exporting it as a "
+            "codec or contain no audio track. Try re-exporting it as a "
             "standard MP4 (H.264 video + AAC audio)."
         )
 

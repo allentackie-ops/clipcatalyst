@@ -92,7 +92,7 @@ def get_storage(settings: Settings) -> Storage:
         return LocalStorage(settings)
     if settings.storage == "s3":
         return S3Storage(settings)
-    raise ValueError(f"Unknown CC_STORAGE {settings.storage!r} — use 'local' or 's3'.")
+    raise ValueError(f"Unknown CC_STORAGE {settings.storage!r}. Use 'local' or 's3'.")
 
 
 class LocalStorage:

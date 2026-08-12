@@ -205,7 +205,7 @@ class Settings:
                 "reverse proxy apart from a stranger: with everyone trusted, "
                 "any direct client speaks for itself and picks its own "
                 "rate-limit bucket by rotating X-Forwarded-For per attempt, so "
-                "the login limiter is not weakened — it is gone, and silently. "
+                "the login limiter is not weakened: it is gone, and silently. "
                 "Name the proxy's actual address or CIDR block (e.g. "
                 "172.18.0.2 or 10.0.0.0/24), or leave CC_TRUSTED_PROXIES empty "
                 "to trust nobody. See DEPLOY.md §7.2."
@@ -216,7 +216,7 @@ class Settings:
             raise RuntimeError(
                 f"CC_BILLING={self.billing!r} but CC_API_TOKEN is empty. With no "
                 "founder token the job routes stay open to anonymous callers, "
-                "who are not attached to any account — they skip plan "
+                "who are not attached to any account. They skip plan "
                 "entitlements and the monthly quota entirely (4K, unmetered), so "
                 "every plan limit becomes optional. Set CC_API_TOKEN "
                 "(openssl rand -hex 32) or set CC_BILLING=off. See DEPLOY.md §7.1."
@@ -224,7 +224,7 @@ class Settings:
         for price_id, names in self.duplicate_price_ids().items():
             raise RuntimeError(
                 f"{' and '.join(names)} are all set to {price_id!r}. One Stripe "
-                "price cannot map to two plans — a webhook carrying it would "
+                "price cannot map to two plans. A webhook carrying it would "
                 "grant whichever plan won the map build. Give each plan its own "
                 "price id."
             )

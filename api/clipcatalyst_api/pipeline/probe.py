@@ -18,7 +18,7 @@ from .types import MediaInfo, PipelineError
 
 _UNREADABLE_MESSAGE = (
     "Couldn't read this video. The file may be corrupt, DRM-protected, or use "
-    "an unsupported format — try re-exporting it as a standard MP4 "
+    "an unsupported format. Try re-exporting it as a standard MP4 "
     "(H.264 video + AAC audio)."
 )
 

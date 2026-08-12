@@ -176,7 +176,7 @@ _PUBLISH_UPDATABLE = {
 LIVE_PUBLISH_STATUSES = ("queued", "uploading")
 
 _PUBLISH_INTERRUPTED_ERROR = (
-    "The upload stopped before it finished — please try posting this clip again."
+    "The upload stopped before it finished. Please try posting this clip again."
 )
 
 _USER_COLUMNS = (
@@ -222,7 +222,7 @@ _USER_UPDATABLE = {
 # `done` and `failed` are terminal — nothing moves a job out of them.
 LIVE_STATUSES = ("queued", "processing")
 
-_INTERRUPTED_ERROR = "Processing was interrupted — please try again."
+_INTERRUPTED_ERROR = "Processing was interrupted. Please try again."
 
 _SCHEMA_STATEMENTS = (
     """
@@ -570,7 +570,7 @@ def update_job(job_id: str, **fields: object) -> None:
         return
     if "status" in fields:
         raise ValueError(
-            "update_job: status is not updatable — move it with transition_status"
+            "update_job: status is not updatable. Move it with transition_status"
             " or finalize_job, which name the status they expect to replace"
         )
     _check_fields("update_job", fields)
@@ -1855,7 +1855,7 @@ def update_publish_job(publish_id: str, **fields: object) -> None:
         return
     if "status" in fields:
         raise ValueError(
-            "update_publish_job: status is not updatable — move it with"
+            "update_publish_job: status is not updatable. Move it with"
             " transition_publish_status, which names the status it replaces"
         )
     unknown = set(fields) - _PUBLISH_UPDATABLE

@@ -116,10 +116,10 @@ _QUOTA_REASONS = {
 #: PUBLISH.md names this one exactly: a quota refusal must say what happened
 #: and when to come back, never "upload failed".
 QUOTA_MESSAGE = (
-    "YouTube's daily upload limit for this app was reached — try tomorrow."
+    "YouTube's daily upload limit for this app was reached. Try tomorrow."
 )
 _UNREACHABLE = (
-    "We couldn't reach YouTube to finish this upload — please try again in a "
+    "We couldn't reach YouTube to finish this upload. Please try again in a "
     "few minutes."
 )
 _REFUSED = (
@@ -127,11 +127,11 @@ _REFUSED = (
     "standing and able to upload, then try again."
 )
 _REJECTED_DETAILS = (
-    "YouTube rejected this post's details — try a shorter title or description."
+    "YouTube rejected this post's details. Try a shorter title or description."
 )
 _SESSION_LOST = (
-    "The upload to YouTube was interrupted and its session has expired — "
-    "please post the clip again."
+    "The upload to YouTube was interrupted and its session has expired. "
+    "Please post the clip again."
 )
 _EMPTY_CLIP = (
     "This clip's video file is empty, so there's nothing to upload. Re-render "
@@ -146,7 +146,7 @@ _NO_KEY = (
 #: unverified sensitive scope means Google itself forces `private`.
 UNVERIFIED_NOTE = (
     "Until Google finishes reviewing this app, uploads land on your channel as "
-    "private videos — you publish them from YouTube."
+    "private videos. You publish them from YouTube."
 )
 VERIFIED_NOTE = (
     "Posts go straight to your channel with the visibility you choose here."
@@ -624,8 +624,8 @@ def _video_id(body: str) -> str:
         # unrecoverable here.
         logger.error("youtube accepted an upload but named no video id")
         raise PublishError(
-            "YouTube accepted the upload but didn't say where it landed — "
-            "check your channel before posting this clip again."
+            "YouTube accepted the upload but didn't say where it landed. "
+            "Check your channel before posting this clip again."
         )
     return video_id
 

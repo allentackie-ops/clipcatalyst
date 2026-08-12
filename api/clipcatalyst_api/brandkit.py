@@ -96,9 +96,9 @@ _UTF8_BOM = b"\xef\xbb\xbf"
 _SVG_SNIFF_BYTES = 1024
 
 WRONG_TYPE_MESSAGE = (
-    "That file isn't an image we can use — pick a PNG, JPEG, WebP or SVG."
+    "That file isn't an image we can use. Pick a PNG, JPEG, WebP or SVG."
 )
-EMPTY_MESSAGE = "That file is empty — pick a PNG, JPEG, WebP or SVG."
+EMPTY_MESSAGE = "That file is empty. Pick a PNG, JPEG, WebP or SVG."
 
 
 @dataclass(frozen=True)
@@ -277,7 +277,7 @@ def validate_logo_bytes(data: bytes) -> tuple[str | None, str | None]:
         return None, EMPTY_MESSAGE
     if len(data) > MAX_LOGO_BYTES:
         return None, (
-            f"That logo is {format_mb(len(data))} MB — the limit is "
+            f"That logo is {format_mb(len(data))} MB. The limit is "
             f"{format_mb(MAX_LOGO_BYTES)} MB."
         )
     content_type = sniff_image_type(data)

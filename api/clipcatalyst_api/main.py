@@ -86,19 +86,19 @@ _LOGIN_FAILED = "Incorrect email or password."
 # One generic refusal for every way an ID token can fail (LIBRARY.md Part 1):
 # bad signature, wrong audience or issuer, expired, not yet valid, unknown
 # key, unverified email. Which of them it was is a server-log fact.
-_GOOGLE_SIGN_IN_FAILED = "That Google sign-in couldn't be verified — please try again."
+_GOOGLE_SIGN_IN_FAILED = "That Google sign-in couldn't be verified. Please try again."
 _GOOGLE_SIGN_IN_OFF = (
     "Sign in with Google isn't enabled on this server (CC_GOOGLE_CLIENT_ID is "
-    "unset) — sign in with your email and password instead."
+    "unset). Sign in with your email and password instead."
 )
 _GOOGLE_KEYS_UNAVAILABLE = (
-    "Google's sign-in keys couldn't be reached just now — please try again in "
+    "Google's sign-in keys couldn't be reached just now. Please try again in "
     "a moment."
 )
 # Both halves of a Google sign-in raced: the address was claimed by another
 # account while this request was resolving it. Vanishingly rare, and honest.
 _GOOGLE_ACCOUNT_RACE = (
-    "That account was being changed at the same moment — please try signing in "
+    "That account was being changed at the same moment. Please try signing in "
     "again."
 )
 # --- email sign-in codes (EMAILAUTH.md) ------------------------------------- #
@@ -110,35 +110,35 @@ _GOOGLE_ACCOUNT_RACE = (
 # code was requested for that address" tells a stranger which addresses are in
 # the middle of signing in, and "that code has expired" confirms one was.
 _EMAIL_CODE_FAILED = (
-    "That code isn't valid — it may have expired or already been used. "
+    "That code isn't valid. It may have expired or already been used. "
     "Request a new one."
 )
 _EMAIL_CODE_OFF = (
-    "Email sign-in codes aren't enabled on this server (CC_MAILER is none) — "
-    "sign in with your email and password instead."
+    "Email sign-in codes aren't enabled on this server (CC_MAILER is none). "
+    "Sign in with your email and password instead."
 )
 # A send that did not happen is an ERROR, never a cheerful "check your inbox".
 # The user is told to try again rather than left watching an inbox nothing is
 # coming to.
 _EMAIL_CODE_SEND_FAILED = (
-    "We couldn't send your sign-in code just now — please try again in a "
+    "We couldn't send your sign-in code just now. Please try again in a "
     "moment, or sign in with your password."
 )
 # The account was claimed between resolving the address and creating it.
 # Vanishingly rare, and honest — mirrors _GOOGLE_ACCOUNT_RACE.
 _EMAIL_CODE_ACCOUNT_RACE = (
-    "That account was being changed at the same moment — please try signing in "
+    "That account was being changed at the same moment. Please try signing in "
     "again."
 )
 _BILLING_OFF = (
-    "Billing isn't enabled on this server yet — plan upgrades will activate "
+    "Billing isn't enabled on this server yet. Plan upgrades will activate "
     "once Stripe is configured."
 )
 # Honest, not coy: it names the feature, the plan that carries it, and what
 # happens meanwhile (BRANDKIT.md — the free tier's mark IS the upsell).
 _BRAND_KIT_FORBIDDEN = (
     "A brand kit is included from the Starter plan up. Your clips render with "
-    "the ClipCatalyst mark for now — upgrade to put your own logo and caption "
+    "the ClipCatalyst mark for now. Upgrade to put your own logo and caption "
     "colour on them."
 )
 _BRAND_UNSUPPORTED_BODY = (
@@ -146,11 +146,11 @@ _BRAND_UNSUPPORTED_BODY = (
     "show_logo) or as JSON."
 )
 _BRAND_UNREADABLE_LOGO = (
-    "That logo couldn't be read — upload the file itself, or a base64 "
+    "That logo couldn't be read. Upload the file itself, or a base64 "
     "'data:' URL of it."
 )
 _BRAND_BAD_COLOR = (
-    "That caption colour isn't a hex value — use #rrggbb (for example #a78bfa)."
+    "That caption colour isn't a hex value. Use #rrggbb (for example #a78bfa)."
 )
 # The ceiling on the whole PUT body, as opposed to MAX_LOGO_BYTES on the decoded
 # logo: a 2 MB logo is ~2.7 MB once base64'd into a data: URL, plus the JSON or
@@ -170,7 +170,7 @@ _CLIP_EXPIRED = (
     "and transcript are still here."
 )
 _CLIP_NOT_A_VIDEO = (
-    "That file isn't a clip we can store — save the MP4 or WebM the Studio "
+    "That file isn't a clip we can store. Save the MP4 or WebM the Studio "
     "rendered."
 )
 _CLIP_UNSUPPORTED_BODY = (
@@ -208,12 +208,12 @@ _CONNECTION_UNKNOWN = "Unknown connection."
 # minutes, or one whose session has since ended. All four are the same answer,
 # and it is deliberately not a redirect — see the route.
 _CONNECT_STATE_INVALID = (
-    "That connection link is no longer valid — it may have expired or already "
+    "That connection link is no longer valid. It may have expired or already "
     "been used. Start again from your account page."
 )
 _CONNECT_REVOKE_FAILED = (
     "We couldn't reach the platform to revoke access just now, so nothing was "
-    "removed — please try again in a moment."
+    "removed. Please try again in a moment."
 )
 # The short codes `/account?connect_error=…` carries. The frontend renders the
 # sentence; the server picks which one, because it is the only side that knows
@@ -230,7 +230,7 @@ _PUBLISH_UNKNOWN = "Unknown post."
 # run it. Recorded on the row AND returned, because a job left reading `queued`
 # with nobody working on it is the one status a poller cannot interpret.
 _PUBLISH_NOT_QUEUED = (
-    "We couldn't start this upload just now — please try posting the clip "
+    "We couldn't start this upload just now. Please try posting the clip "
     "again in a moment."
 )
 
@@ -909,7 +909,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
             # signup form (ACCOUNTS.md) — the login ERROR path stays generic.
             raise HTTPException(
                 status_code=409,
-                detail="An account with this email already exists — sign in instead.",
+                detail="An account with this email already exists. Sign in instead.",
             )
         return _signed_in(user)
 
@@ -1325,7 +1325,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
         # uploading 200 MB.
         stored_bytes = db.library_bytes(str(user["id"]))
         full = (
-            f"Your library is full — the limit is "
+            f"Your library is full. The limit is "
             f"{_format_size(settings.library_max_bytes)} of stored clips, and "
             f"{_format_size(stored_bytes)} is in use. Delete a clip to make "
             "room, or let one expire."
@@ -1445,7 +1445,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 raise HTTPException(
                     status_code=500,
                     detail=(
-                        "That clip couldn't be deleted just now — please try "
+                        "That clip couldn't be deleted just now. Please try "
                         "again in a moment."
                     ),
                 ) from None
@@ -1552,7 +1552,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
             # flight any more, so the honest answer is to let them ask again.
             raise HTTPException(
                 status_code=409,
-                detail="That clip was just posted — refresh and try again.",
+                detail="That clip was just posted. Refresh and try again.",
             )
 
         try:
@@ -1754,7 +1754,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
             # there is no fallback, that is what "required" means.
             logger.warning(
                 "connect callback for %s: the staged PKCE verifier could not be "
-                "decrypted — refusing the exchange",
+                "decrypted, so the exchange is refused",
                 provider.platform,
             )
             raise HTTPException(
@@ -1771,7 +1771,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 redirect=str(staged["redirect_uri"]),
             )
         except connections.AccountMissing as failure:
-            logger.info("connect %s: nothing to publish to — %s", platform, failure)
+            logger.info("connect %s: nothing to publish to (%s)", platform, failure)
             return _account_redirect(
                 settings, f"connect_error={_CONNECT_ERROR_NO_ACCOUNT}"
             )
@@ -1879,7 +1879,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
         if not user["stripe_customer_id"]:
             raise HTTPException(
                 status_code=400,
-                detail="No billing profile yet — upgrade to a paid plan first.",
+                detail="No billing profile yet. Upgrade to a paid plan first.",
             )
         return PortalResponse(url=gateway.create_portal(user))
 
@@ -1930,7 +1930,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"File is too large — the limit is "
+                    f"File is too large. The limit is "
                     f"{settings.max_upload_bytes} bytes."
                 ),
             )
@@ -1975,7 +1975,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
         if settings.storage != "local":
             raise HTTPException(
                 status_code=404,
-                detail="Direct uploads are disabled — use the presigned S3 URL.",
+                detail="Direct uploads are disabled. Use the presigned S3 URL.",
             )
         job = db.get_job(job_id)
         if job is None:
@@ -1986,7 +1986,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
         if job["status"] != "awaiting_upload":
             raise HTTPException(
                 status_code=409,
-                detail=f"Job is {job['status']} — it is no longer accepting an upload.",
+                detail=f"Job is {job['status']}. It is no longer accepting an upload.",
             )
 
         content_length = request.headers.get("content-length")
@@ -2004,7 +2004,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"Upload is too large — the limit is "
+                    f"Upload is too large. The limit is "
                     f"{settings.max_upload_bytes} bytes."
                 ),
             )
@@ -2022,7 +2022,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
                         raise HTTPException(
                             status_code=413,
                             detail=(
-                                f"Upload is too large — the limit is "
+                                f"Upload is too large. The limit is "
                                 f"{settings.max_upload_bytes} bytes."
                             ),
                         )
@@ -2094,7 +2094,7 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 raise HTTPException(
                     status_code=402,
                     detail=(
-                        f"Monthly clip limit reached — the {plan_name} "
+                        f"Monthly clip limit reached. The {plan_name} "
                         f"plan includes {limit} clips per month, "
                         f"{db.get_usage(owner_id, month)} are used for {month}, "
                         f"and this job would render {count} more. The "

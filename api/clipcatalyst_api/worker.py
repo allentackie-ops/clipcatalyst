@@ -46,16 +46,16 @@ logger = logging.getLogger(__name__)
 PROGRESS_WRITE_INTERVAL_SECONDS = 0.5
 
 _GENERIC_ERROR = (
-    "Something went wrong while processing this video. Please try again — "
-    "if it keeps failing, re-export the file as a standard MP4."
+    "Something went wrong while processing this video. Please try again. "
+    "If it keeps failing, re-export the file as a standard MP4."
 )
 _NO_SPEECH_ERROR = (
     "We couldn't find enough speech in this video to build clips. "
-    "ClipCatalyst needs clear spoken dialogue — try a talking video."
+    "ClipCatalyst needs clear spoken dialogue. Try a talking video."
 )
 _ALL_RENDERS_FAILED_ERROR = (
     "Rendering failed for every planned clip. The video may use an unusual "
-    "format — try re-exporting it as a standard MP4 (H.264 + AAC)."
+    "format. Try re-exporting it as a standard MP4 (H.264 + AAC)."
 )
 _TIMEOUT_ERROR = (
     "This video took too long to process and was stopped. Try a shorter clip "
@@ -796,7 +796,7 @@ def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> 
 # --------------------------------------------------------------------------- #
 
 _PUBLISH_GENERIC_ERROR = (
-    "Something went wrong while posting this clip. Please try again — if it "
+    "Something went wrong while posting this clip. Please try again. If it "
     "keeps failing, disconnect and reconnect the channel."
 )
 _PUBLISH_TIMEOUT_ERROR = (

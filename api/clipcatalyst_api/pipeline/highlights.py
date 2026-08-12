@@ -684,23 +684,23 @@ def _make_tip(
     liabilities = [
         (
             WEIGHTS["hook"] * (1 - score.hook.score),
-            "Punch up the first line — open on a question or a bold claim so nobody scrolls past.",
+            "Punch up the first line. Open on a question or a bold claim so nobody scrolls past.",
         ),
         (
             WEIGHTS["density"] * (1 - score.density),
-            "Tighten the wording — cutting filler raises ideas-per-second, and that holds attention.",
+            "Tighten the wording. Cutting filler raises ideas-per-second, and that holds attention.",
         ),
         (
             WEIGHTS["energy"] * (1 - score.energy),
-            "The delivery sits flat here — pick a take with more vocal punch, or add cuts for pace.",
+            "The delivery sits flat here. Pick a take with more vocal punch, or add cuts for pace.",
         ),
         (
             WEIGHTS["completeness"] * (1 - score.completeness),
-            "It cuts off mid-thought — end on a finished sentence so the clip feels complete.",
+            "It cuts off mid-thought. End on a finished sentence so the clip feels complete.",
         ),
         (
             WEIGHTS["coldOpen"] * score.cold_open,
-            "This starts inside the intro — skip the warm-up and open where the story begins.",
+            "This starts inside the intro. Skip the warm-up and open where the story begins.",
         ),
     ]
     pause = _longest_pause_in(silences, start, end)
@@ -709,7 +709,7 @@ def _make_tip(
         liabilities.append(
             (
                 WEIGHTS["pause"] * score.pause + (0.02 if pause_length >= 0.7 else 0.0),
-                f"Trim the pause at {_format_clip_time(pause_at - start)} — dead air is retention poison.",
+                f"Trim the pause at {_format_clip_time(pause_at - start)}. Dead air is retention poison.",
             )
         )
     liabilities.sort(key=lambda l: -l[0])  # stable: ties keep original order

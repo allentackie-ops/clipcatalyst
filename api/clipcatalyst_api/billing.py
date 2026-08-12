@@ -81,7 +81,7 @@ def get_gateway(settings: Settings) -> Gateway | None:
         return None
     for price_id, names in settings.duplicate_price_ids().items():
         raise ValueError(
-            f"{' and '.join(names)} are all set to {price_id!r} — one Stripe "
+            f"{' and '.join(names)} are all set to {price_id!r}. One Stripe "
             "price cannot map to two plans. Give each plan its own price id."
         )
     if settings.billing == "stripe":
@@ -89,7 +89,7 @@ def get_gateway(settings: Settings) -> Gateway | None:
     if settings.billing == "fake":
         return _fake_gateway
     raise ValueError(
-        f"Unknown CC_BILLING {settings.billing!r} — use 'stripe', 'fake', or 'off'."
+        f"Unknown CC_BILLING {settings.billing!r}. Use 'stripe', 'fake', or 'off'."
     )
 
 
@@ -197,7 +197,7 @@ def apply_event(event: Mapping[str, object], settings: Settings) -> bool:
     if event_type not in HANDLED_EVENTS:
         return False
     if db.stripe_event_seen(event_id):
-        logger.info("webhook %s (%s) already processed — no-op", event_id, event_type)
+        logger.info("webhook %s (%s) already processed: no-op", event_id, event_type)
         return True
     obj = event["data"]["object"]  # type: ignore[index, call-overload]
     if event_type == "checkout.session.completed":
@@ -224,7 +224,7 @@ def _handle_checkout_completed(session: Mapping[str, object], settings: Settings
     if subscription is None:
         logger.warning(
             "checkout.session.completed for user %s carried no resolvable "
-            "subscription — waiting for customer.subscription.updated",
+            "subscription. Waiting for customer.subscription.updated",
             user["id"],
         )
         return
@@ -282,7 +282,7 @@ def _apply_subscription(
     else:
         logger.warning(
             "subscription %s has price %r which maps to no CC_STRIPE_PRICE_* "
-            "plan — leaving user %s on plan %r",
+            "plan, leaving user %s on plan %r",
             subscription.get("id"),
             price_id,
             user["id"],
@@ -381,7 +381,7 @@ def _find_user(user_id: str, obj: Mapping[str, object]) -> dict | None:
         if user is not None:
             return user
     logger.warning(
-        "webhook event matched no user (user_id=%r, customer=%r) — ignored",
+        "webhook event matched no user, ignoring it (user_id=%r, customer=%r)",
         user_id,
         customer_id,
     )

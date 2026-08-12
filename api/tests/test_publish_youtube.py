@@ -755,7 +755,7 @@ def test_a_fourth_5xx_stops_the_upload_with_an_honest_message(
     body = _publish(sandbox, token, clip["id"])
     assert body["status"] == "failed"
     assert body["error"] == (
-        "We couldn't reach YouTube to finish this upload — please try again in "
+        "We couldn't reach YouTube to finish this upload. Please try again in "
         "a few minutes."
     )
     # Stopped rather than hammered: four attempts, not five.
@@ -798,7 +798,9 @@ _QUOTA_BODY = json.dumps(
         }
     }
 )
-_QUOTA_MESSAGE = "YouTube's daily upload limit for this app was reached — try tomorrow."
+_QUOTA_MESSAGE = (
+    "YouTube's daily upload limit for this app was reached. Try tomorrow."
+)
 
 
 def test_a_403_quota_becomes_the_friendly_message(sandbox: SimpleNamespace) -> None:

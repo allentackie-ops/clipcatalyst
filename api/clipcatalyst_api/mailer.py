@@ -107,7 +107,7 @@ def login_code_message(code: str, ttl_minutes: int) -> tuple[str, str]:
         f"\n    {code}\n\n"
         f"It works once and expires in {_minutes(ttl_minutes)}.\n\n"
         "Nobody at ClipCatalyst will ever ask you for this code. If you did "
-        "not try to sign in, you can ignore this email — nothing has changed "
+        "not try to sign in, you can ignore this email. Nothing has changed "
         "and no account was created.\n"
     )
     return subject, body
@@ -154,7 +154,7 @@ def _send_console(settings: Settings, to: str, subject: str, body: str) -> None:
     the flow. It is never reached on a box whose CC_MAILER says anything else.
     """
     logger.info(
-        "CC_MAILER=console — not sending mail, printing it instead.\n"
+        "CC_MAILER=console, so this mail is printed instead of sent.\n"
         "  From: %s\n  To: %s\n  Subject: %s\n\n%s",
         settings.mail_from,
         to,

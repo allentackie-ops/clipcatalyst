@@ -230,7 +230,7 @@ def _load_keys(*, force: bool) -> dict[str, bytes]:
                     f"could not fetch Google's key set: {type(error).__name__}: {error}"
                 ) from error
             logger.warning(
-                "could not refresh Google's key set (%s: %s) — continuing with "
+                "could not refresh Google's key set (%s: %s), continuing with "
                 "the %d cached key(s)",
                 type(error).__name__,
                 error,
@@ -243,7 +243,7 @@ def _load_keys(*, force: bool) -> dict[str, bytes]:
                     f"the key set at {JWKS_URL} carried no usable RS256 signing keys"
                 )
             logger.warning(
-                "Google's key set carried no usable RS256 signing keys — "
+                "Google's key set carried no usable RS256 signing keys, "
                 "continuing with the %d cached key(s)",
                 len(_keys),
             )
@@ -329,7 +329,7 @@ def verify_id_token(raw_token: str, client_id: str) -> GoogleIdentity:
 
     keys = _load_keys(force=False)
     if kid not in keys:
-        logger.info("unknown Google signing key %r — refreshing the key set", kid)
+        logger.info("unknown Google signing key %r, refreshing the key set", kid)
         keys = _load_keys(force=True)
     if kid not in keys:
         raise InvalidIdToken(f"no Google signing key with id {kid!r}")

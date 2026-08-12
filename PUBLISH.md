@@ -107,7 +107,7 @@ so TikTok and Instagram slot in later without touching the queue.
   is refused with a clear message rather than a 500.
 - Quota: YouTube's upload quota is small (a few uploads/day on a default
   project). A 403 quota error must surface as "YouTube's daily upload limit
-  for this app was reached — try tomorrow", not a generic failure.
+  for this app was reached. Try tomorrow.", not a generic failure.
 
 ## Part 4 — UI
 

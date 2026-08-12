@@ -435,7 +435,7 @@ def optional_actor(
 # construction rather than by a cap anybody has to enforce.
 RATE_LIMIT_PER_MINUTE = 10
 
-_RATE_LIMITED = "Too many attempts — please wait a minute and try again."
+_RATE_LIMITED = "Too many attempts. Please wait a minute and try again."
 
 # Redis key layout: cc:rl:<route>:<minute>:<client>. The window is IN the key,
 # so a new minute is a new key rather than a counter somebody has to reset.
@@ -506,7 +506,7 @@ _memory_hours: list[tuple[int, int]] = [(-1, 0)] * _MEMORY_SLOTS
 _EMAIL_CODE_ROUTE = "email-code"
 
 _EMAIL_CODE_RATE_LIMITED = (
-    "That address has been sent too many sign-in codes — try again in an hour, "
+    "That address has been sent too many sign-in codes. Try again in an hour, "
     "or sign in with your password."
 )
 
@@ -527,8 +527,8 @@ def _trusted_networks(entries: tuple[str, ...]) -> tuple[_Network, ...]:
             networks.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
             logger.warning(
-                "CC_TRUSTED_PROXIES entry %r is not an ip address or CIDR block "
-                "— ignoring it (forwarded headers from that peer stay untrusted)",
+                "CC_TRUSTED_PROXIES entry %r is not an ip address or CIDR block, "
+                "so it is ignored (forwarded headers from that peer stay untrusted)",
                 entry,
             )
     return tuple(networks)
@@ -659,7 +659,7 @@ def _log_redis_outage(minute: int, error: BaseException, *, fail_open: bool) -> 
             return
         _logged_outage_minute = minute
     logger.warning(
-        "rate limiter could not reach redis (%s: %s) — credential attempts are "
+        "rate limiter could not reach redis (%s: %s). Credential attempts are "
         "being %s while this lasts (CC_RATE_LIMIT_FAIL_OPEN)",
         type(error).__name__,
         error,

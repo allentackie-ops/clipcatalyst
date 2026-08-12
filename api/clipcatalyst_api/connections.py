@@ -189,7 +189,7 @@ def _youtube_identity(payload: Mapping[str, object]) -> tuple[str, str]:
     title = str(snippet.get("title") or "") if isinstance(snippet, Mapping) else ""
     if not channel_id:
         raise AccountMissing(
-            "YouTube didn't name a channel for that account — please try again."
+            "YouTube didn't name a channel for that account. Please try again."
         )
     return channel_id, title or "YouTube channel"
 
@@ -222,7 +222,7 @@ PROVIDERS: dict[str, Provider] = {
         authorize_extra=(("access_type", "offline"), ("prompt", "consent")),
         note=(
             "Until Google finishes reviewing this app, uploads land on your "
-            "channel as private videos — you publish them from YouTube."
+            "channel as private videos. You publish them from YouTube."
         ),
     ),
     # Known, and honestly unavailable. TikTok's Direct Post needs an audit and
@@ -240,7 +240,7 @@ PROVIDERS: dict[str, Provider] = {
         identify=lambda payload: ("", ""),
         connectable=False,
         reason=(
-            "TikTok posting is awaiting review — until it lands, use the share "
+            "TikTok posting is awaiting review. Until it lands, use the share "
             "button on a clip to post it from your phone."
         ),
     ),
@@ -255,7 +255,7 @@ PROVIDERS: dict[str, Provider] = {
         identify=lambda payload: ("", ""),
         connectable=False,
         reason=(
-            "Instagram posting is awaiting review — until it lands, use the "
+            "Instagram posting is awaiting review. Until it lands, use the "
             "share button on a clip to post it from your phone."
         ),
     ),
@@ -312,7 +312,7 @@ def _fernet_for(key: str) -> Fernet | None:
         return Fernet(key.encode("utf-8"))
     except (ValueError, TypeError):
         logger.warning(
-            "CC_TOKEN_KEY is set but is not a valid Fernet key — connections "
+            "CC_TOKEN_KEY is set but is not a valid Fernet key, so connections "
             "are refused rather than stored unencrypted. Generate one with: "
             "python -c \"from cryptography.fernet import Fernet; "
             'print(Fernet.generate_key().decode())"'
@@ -682,7 +682,7 @@ def revoke(provider: Provider, token: str) -> None:
         )
     if status >= 400:
         logger.info(
-            "%s answered %s to a revoke — that grant was already invalid",
+            "%s answered %s to a revoke, so that grant was already invalid",
             provider.label,
             _reason(_payload(body), status),
         )
@@ -759,11 +759,11 @@ def _forget(connection_id: str, why: str) -> None:
     logger.warning("connection %s removed: %s", connection_id, why)
 
 
-#: What a user is told when the connection they had is no longer usable. One
-#: sentence, one action — every cause (rotated key, revoked grant, a refresh
-#: token that never arrived) leads to the same place.
+#: What a user is told when the connection they had is no longer usable. Two
+#: short sentences, one action: every cause (rotated key, revoked grant, a
+#: refresh token that never arrived) leads to the same place.
 RECONNECT_REQUIRED = (
-    "That channel needs to be connected again — open your account page and "
+    "That channel needs to be connected again. Open your account page and "
     "reconnect it."
 )
 
@@ -869,15 +869,15 @@ def disconnect(settings: Settings, connection: Mapping[str, object]) -> None:
             token = decrypt(settings, stored_access)
     except TokenUnreadable as error:
         logger.warning(
-            "connection %s: nothing revocable to send %s — %s",
+            "connection %s: nothing revocable to send %s (%s)",
             connection_id,
             provider.label if provider else "the provider",
             error,
         )
     except TokenKeyUnavailable:
         logger.warning(
-            "connection %s: removed without revoking — this box has no usable "
-            "CC_TOKEN_KEY to read its tokens with",
+            "connection %s: removed without revoking, because this box has no "
+            "usable CC_TOKEN_KEY to read its tokens with",
             connection_id,
         )
     if token and provider is not None and provider.revoke_url:

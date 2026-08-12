@@ -116,19 +116,24 @@ function CheckMark() {
   );
 }
 
-function DashMark() {
+/**
+ * "Not supported". A cross rather than the usual horizontal rule, because a
+ * table of dash glyphs reads as punctuation scattered through the page, which
+ * is the thing this design pass exists to remove.
+ */
+function NoMark() {
   return (
     <span className="inline-flex items-center justify-center">
       <svg
-        width="18"
-        height="18"
+        width="16"
+        height="16"
         viewBox="0 0 20 20"
         fill="none"
         aria-hidden
         className="text-zinc-600"
       >
         <path
-          d="M5 10h10"
+          d="M6 6l8 8M14 6l-8 8"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
@@ -141,7 +146,7 @@ function DashMark() {
 
 function CellValue({ cell, highlight }: { cell: Cell; highlight: boolean }) {
   if (cell.kind === "yes") return <CheckMark />;
-  if (cell.kind === "no") return <DashMark />;
+  if (cell.kind === "no") return <NoMark />;
   const tone = highlight ? "font-semibold text-white" : "text-zinc-400";
   const mono = cell.mono ? "font-mono" : "";
   return <span className={`text-sm ${mono} ${tone}`.trim()}>{cell.value}</span>;
@@ -282,15 +287,18 @@ export default function Comparison() {
           60-minute source video.
         </p>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* One label for the group instead of the same mono-uppercase kicker
+            repeated on all four cards, which read as decoration. */}
+        <h3 className="mt-14 font-display text-lg font-semibold text-white">
+          Where each one falls short
+        </h3>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {GAPS.map(({ name, gap }) => (
             <Card key={name} className="p-5">
-              <p className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.2em] text-zinc-500">
-                Where it falls short
-              </p>
-              <h3 className="mt-2 font-display text-base font-semibold text-white">
+              <h4 className="font-display text-base font-semibold text-white">
                 {name}
-              </h3>
+              </h4>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">{gap}</p>
             </Card>
           ))}

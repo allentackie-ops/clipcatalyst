@@ -112,6 +112,12 @@ body {
   fill: var(--cc-loader-fill, currentColor);
   animation: var(--animate-splice);
 }
+/* Stagger 45 ms, not 90. At 90 the eased curve is steep enough mid-segment
+   that the left piece had fully separated while the right two were still
+   nearly joined, so it read as "left leaves, then right leaves" rather than
+   one bar splitting into three. Halving it keeps the sense of sequence and
+   restores the single-cut read. The middle piece cannot move — its merged and
+   resting positions are identical — so it is the anchor the other two leave. */
 .cc-loader-mark svg > path:nth-child(1) {
   --cc-dx: 1.5px;
   --cc-dy: 3px;
@@ -120,12 +126,12 @@ body {
 .cc-loader-mark svg > path:nth-child(2) {
   --cc-dx: 0px;
   --cc-dy: 0px;
-  animation-delay: 90ms;
+  animation-delay: 45ms;
 }
 .cc-loader-mark svg > path:nth-child(3) {
   --cc-dx: -1.5px;
   --cc-dy: -3px;
-  animation-delay: 180ms;
+  animation-delay: 90ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

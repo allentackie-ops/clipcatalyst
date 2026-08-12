@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import RouteProgress from "@/components/RouteProgress";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -58,6 +59,8 @@ export default function RootLayout({
         >
           Skip to content
         </a>
+        {/* Renders null unless a client-side navigation outlives 180 ms. */}
+        <RouteProgress />
         {children}
       </body>
     </html>

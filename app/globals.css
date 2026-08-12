@@ -37,6 +37,8 @@
   --animate-marquee: marquee 40s linear infinite;
   --animate-pulse-soft: pulse-soft 3s ease-in-out infinite;
   --animate-rise: rise 0.6s ease-out both;
+  --animate-splice: splice 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  --animate-breathe: breathe 1.8s ease-in-out infinite;
 
   @keyframes marquee {
     from { transform: translateX(0); }
@@ -49,6 +51,19 @@
   @keyframes rise {
     from { opacity: 0; transform: translateY(16px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  /* The mark explaining itself: one wide video cut into three tall clips.
+     --cc-dx/--cc-dy are the *merged* offsets, set per piece below; the
+     resting position is translate(0,0), i.e. the paths exactly as drawn. */
+  @keyframes splice {
+    0%   { transform: translate(var(--cc-dx, 0px), var(--cc-dy, 0px)); }
+    38%  { transform: translate(0px, 0px); }
+    62%  { transform: translate(0px, 0px); }
+    100% { transform: translate(var(--cc-dx, 0px), var(--cc-dy, 0px)); }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
   }
 }
 
@@ -83,6 +98,55 @@ body {
   background: transparent;
 }
 
+/* --- Branded loading ------------------------------------------------------
+   The loader animates the real <Mark> geometry from components/ui.tsx — the
+   three <path> elements are the logo's own, moved only by transform. Nothing
+   is redrawn here, so the loader can never drift from the logo.
+
+   Merged offsets: the mark rests as three 6×12 pieces with 1.5-unit cuts
+   between them, the outer two sitting 3 units above and below the middle.
+   Closing both cuts (±1.5 in x) and levelling the outer pieces onto the
+   middle's row (±3 in y) merges all three into one 18×12 rounded rectangle
+   centred on the same point — the wide video, before it was cut. */
+.cc-loader-mark svg > path {
+  fill: var(--cc-loader-fill, currentColor);
+  animation: var(--animate-splice);
+}
+.cc-loader-mark svg > path:nth-child(1) {
+  --cc-dx: 1.5px;
+  --cc-dy: 3px;
+  animation-delay: 0ms;
+}
+.cc-loader-mark svg > path:nth-child(2) {
+  --cc-dx: 0px;
+  --cc-dy: 0px;
+  animation-delay: 90ms;
+}
+.cc-loader-mark svg > path:nth-child(3) {
+  --cc-dx: -1.5px;
+  --cc-dy: -3px;
+  animation-delay: 180ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Reduced motion means NO motion, not less of it. The pieces are pinned to
+   their resting positions (transform: none is the geometry as authored) and
+   the only thing left alive is opacity. This block sits after the blanket
+   reset above and outranks it, so the breathe survives at its real 1.8 s
+   instead of being flattened to 0.01 ms. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-loader-mark svg > path {
+    animation: none !important;
+    transform: none !important;
+  }
+  .cc-loader-mark {
+    animation: var(--animate-breathe) !important;
+  }
+  .cc-route-progress {
+    animation: var(--animate-breathe) !important;
+    transform: none !important;
+  }
 }

@@ -262,11 +262,11 @@ export function useStudioPipeline() {
         // Catches files whose pick-time probe couldn't report a duration.
         if (duration > MAX_SOURCE_SECONDS) {
           throw new Error(
-            `That video runs ${formatDuration(duration)} — the browser beta caps out at 20:00. Trim it down and try again.`
+            `That video runs ${formatDuration(duration)}, and the browser beta caps out at 20:00. Trim it down and try again.`
           );
         }
         if (duration < 5) {
-          throw new Error("That video is too short to clip — give it at least a few seconds of speech.");
+          throw new Error("That video is too short to clip. Give it at least a few seconds of speech.");
         }
         const features = computeAudioFeatures(pcm, 16000);
         if (abortedRef.current) return;
@@ -292,7 +292,7 @@ export function useStudioPipeline() {
         if (abortedRef.current) return;
         if (transcript.words.length < 8) {
           throw new Error(
-            "Couldn't find enough speech to clip. Studio needs spoken audio — music-only videos won't work yet."
+            "Couldn't find enough speech to clip. Studio needs spoken audio, so music-only videos won't work yet."
           );
         }
 
@@ -307,7 +307,7 @@ export function useStudioPipeline() {
           count: settings.count,
         });
         if (plans.length === 0) {
-          throw new Error("No clip-worthy moments found — try a longer or more talkative video.");
+          throw new Error("No clip-worthy moments found. Try a longer or more talkative video.");
         }
         if (abortedRef.current) return;
 

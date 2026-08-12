@@ -3,9 +3,9 @@ import AccountProvider from "@/components/account/AccountProvider";
 import StudioApp from "@/components/studio/StudioApp";
 
 export const metadata: Metadata = {
-  title: "Studio — ClipCatalyst",
+  title: "Studio | ClipCatalyst",
   description:
-    "Turn a video into vertical, captioned, scored clips — right in your browser.",
+    "Turn a video into vertical, captioned, scored clips, right in your browser.",
 };
 
 export default function StudioPage() {

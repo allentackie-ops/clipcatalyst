@@ -264,7 +264,7 @@ test("bakeRenderResult stores the edited plan's words on the session", () => {
   assert.equal(baked.dirty, false);
   const last = baked.chat[baked.chat.length - 1];
   assert.equal(last.role, "catalyst");
-  assert.equal(last.text, "Baked in — the clip is now 3.5 s.");
+  assert.equal(last.text, "Baked in. The clip is now 3.5 s.");
 });
 
 test("bakeRenderResult keeps mid-render edits dirty", () => {

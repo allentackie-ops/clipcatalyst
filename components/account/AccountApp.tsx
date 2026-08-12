@@ -26,7 +26,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Badge, Button, Card, Container, Eyebrow } from "@/components/ui";
+import { Badge, Button, Card, Container } from "@/components/ui";
 import BrandKitPanel from "@/components/studio/BrandKitPanel";
 import { cloudEnabled } from "@/components/studio/cloud";
 import {
@@ -106,7 +106,6 @@ function OfflineCard() {
   return (
     <div className="mx-auto max-w-xl text-center">
       <Card className="p-8 sm:p-12">
-        <Eyebrow>Account</Eyebrow>
         <h1
           tabIndex={-1}
           className="font-display text-2xl font-semibold tracking-tight text-white outline-none sm:text-3xl"
@@ -115,8 +114,8 @@ function OfflineCard() {
         </h1>
         <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
           Sign-in, plans, and billing activate when the ClipCatalyst server
-          is live. Until then, Studio runs entirely in your browser — free,
-          no account needed.
+          is live. Until then, Studio runs entirely in your browser, free and
+          with no account needed.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Button href="/studio">Open Studio</Button>
@@ -178,7 +177,7 @@ function EmailCodeForm() {
       setStage("code");
       setCode("");
       setWait(RESEND_AFTER_SECONDS);
-      if (again) setNote("New code sent — the previous one no longer works.");
+      if (again) setNote("New code sent. The previous one no longer works.");
     } catch (err) {
       // The server's own sentence: 503 (no mailer, or the send failed) and
       // 429 (too many codes for this address, or from this machine) both say
@@ -186,7 +185,7 @@ function EmailCodeForm() {
       setError(
         err instanceof Error
           ? err.message
-          : "Couldn't send that code — try again."
+          : "Couldn't send that code. Try again."
       );
     } finally {
       setBusy(false);
@@ -204,7 +203,7 @@ function EmailCodeForm() {
       await refresh(); // flips the page to the dashboard; this unmounts
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "That code didn't work — try again."
+        err instanceof Error ? err.message : "That code didn't work. Try again."
       );
     } finally {
       setBusy(false);
@@ -227,7 +226,7 @@ function EmailCodeForm() {
         </h2>
         <p className="mt-1 text-sm leading-relaxed text-zinc-400">
           {stage === "address"
-            ? "No password to remember — we'll send you a 6-digit code."
+            ? "No password to remember. We'll send you a 6-digit code."
             : `Enter the 6-digit code we sent to ${email}.`}
         </p>
       </div>
@@ -404,7 +403,7 @@ function AuthCard() {
       await refresh(); // flips the page to the dashboard
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Something went wrong — try again."
+        err instanceof Error ? err.message : "Something went wrong. Try again."
       );
     } finally {
       setBusy(false);
@@ -523,7 +522,7 @@ function AuthCard() {
       </form>
 
       {/* Google, alongside the password form and never instead of it. Renders
-          nothing — and loads no third-party script — when this build has no
+          nothing, and loads no third-party script, when this build has no
           client id (LIBRARY.md Part 1). */}
       <GoogleSignInButton />
     </Card>
@@ -592,12 +591,12 @@ function PlanCard({ user }: { user: AccountUser }) {
       {lapsed ? (
         <p className="mt-3 text-xs leading-relaxed text-ember-300">
           Your {PLAN_LABELS[user.plan]} subscription is{" "}
-          {(STATUS_LABELS[user.plan_status] ?? user.plan_status ?? "inactive").toLowerCase()}{" "}
-          — you&rsquo;re back on Free.
+          {(STATUS_LABELS[user.plan_status] ?? user.plan_status ?? "inactive").toLowerCase()}
+          , so you&rsquo;re back on Free.
         </p>
       ) : user.plan_status === "past_due" ? (
         <p className="mt-3 text-xs leading-relaxed text-ember-300">
-          Payment past due — update your card via “Manage billing” to keep{" "}
+          Payment is past due. Update your card via “Manage billing” to keep{" "}
           {PLAN_LABELS[user.plan]}.
         </p>
       ) : null}
@@ -639,7 +638,7 @@ function UsageCard({ user }: { user: AccountUser }) {
             className={`h-full rounded-full ${
               exhausted
                 ? "bg-ember-500"
-                : "bg-gradient-to-r from-brand-500 to-spark-400"
+                : "bg-brand-500"
             }`}
             style={{ width: `${pct}%` }}
           />
@@ -651,8 +650,8 @@ function UsageCard({ user }: { user: AccountUser }) {
       )}
       {exhausted ? (
         <p className="mt-3 text-xs leading-relaxed text-ember-300">
-          You&rsquo;ve used this month&rsquo;s clips — an upgrade below
-          unlocks more.
+          You&rsquo;ve used this month&rsquo;s clips. An upgrade below unlocks
+          more.
         </p>
       ) : null}
     </Card>
@@ -805,7 +804,7 @@ export default function AccountApp() {
         setBillingBusy(null);
         setAutoNote(null);
         setBillingError(
-          e instanceof Error ? e.message : "Checkout failed — try again."
+          e instanceof Error ? e.message : "Checkout failed. Try again."
         );
       }
     },
@@ -823,7 +822,7 @@ export default function AccountApp() {
       setBillingError(
         e instanceof Error
           ? e.message
-          : "Couldn't open the billing portal — try again."
+          : "Couldn't open the billing portal. Try again."
       );
     }
   }, []);
@@ -837,7 +836,7 @@ export default function AccountApp() {
     autoCheckoutRef.current = true;
     if (effectivePlan(user) !== "free") {
       setAutoNote(
-        `You're already on ${PLAN_LABELS[effectivePlan(user)]} — use "Manage billing" to change plans.`
+        `You're already on ${PLAN_LABELS[effectivePlan(user)]}. Use "Manage billing" to change plans.`
       );
       return;
     }
@@ -884,10 +883,6 @@ export default function AccountApp() {
 
   return (
     <section className="relative py-16 sm:py-24">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/20 blur-[120px]"
-      />
       <Container className="relative">
         <div ref={viewRef} className="mx-auto w-full max-w-3xl">
           {cloudEnabled ? (
@@ -899,22 +894,22 @@ export default function AccountApp() {
                     aria-hidden
                   />
                   <p className="text-sm text-zinc-300">
-                    Confirming your upgrade — this usually takes a few
+                    Confirming your upgrade. This usually takes a few
                     seconds…
                   </p>
                 </Card>
               ) : confirm === "confirmed" && user ? (
                 <div className="flex items-center gap-3 rounded-2xl border border-signal-500/30 bg-signal-500/10 px-5 py-4">
                   <p className="text-sm font-medium text-white">
-                    Upgrade confirmed — you&rsquo;re on{" "}
+                    Upgrade confirmed. You&rsquo;re on{" "}
                     {PLAN_LABELS[effectivePlan(user)]}.
                   </p>
                 </div>
               ) : confirm === "timeout" ? (
                 <div className="flex flex-col items-start gap-3 rounded-2xl border border-ember-500/30 bg-ember-500/[0.06] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm leading-relaxed text-ember-300">
-                    Payment received — activating your plan can take a
-                    minute. It&rsquo;ll show up here shortly.
+                    Payment received. Activating your plan can take a minute,
+                    and it&rsquo;ll show up here shortly.
                   </p>
                   <Button
                     variant="ghost"
@@ -928,7 +923,7 @@ export default function AccountApp() {
               {checkoutReturn === "cancelled" ? (
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-line-strong bg-white/5 px-5 py-4">
                   <p className="text-sm text-zinc-300">
-                    Checkout cancelled — nothing changed.
+                    Checkout cancelled. Nothing changed.
                   </p>
                   <button
                     type="button"
@@ -973,7 +968,6 @@ export default function AccountApp() {
           ) : view === "signedout" ? (
             <div className="mx-auto mt-4 max-w-md animate-rise">
               <div className="text-center">
-                <Eyebrow>Account</Eyebrow>
                 <h1
                   tabIndex={-1}
                   className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl"
@@ -981,7 +975,7 @@ export default function AccountApp() {
                   Sign in to ClipCatalyst
                 </h1>
                 <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-                  Your plan, usage, and cloud clips — one account everywhere.
+                  Your plan, usage, and cloud clips. One account everywhere.
                 </p>
                 {pendingPlan ? (
                   <p className="mt-3 text-sm text-brand-300">
@@ -998,7 +992,6 @@ export default function AccountApp() {
             <div className="mt-4 animate-rise">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <Eyebrow>Account</Eyebrow>
                   <h1
                     tabIndex={-1}
                     className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl"
@@ -1079,7 +1072,7 @@ export default function AccountApp() {
                       : "Manage billing"}
                   </Button>
                   <p className="text-xs text-zinc-500">
-                    Update your card, switch plans, or cancel — via Stripe.
+                    Update your card, switch plans, or cancel, all via Stripe.
                   </p>
                 </div>
               ) : null}

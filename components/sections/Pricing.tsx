@@ -118,16 +118,13 @@ function DashIcon() {
 }
 
 function TierBody({ tier }: { tier: Tier }) {
-  // Single destination per tier now — see the Tier type.
+  // Single destination per tier now. See the Tier type.
   const { cta, href } = tier;
   return (
     <div className="flex h-full flex-col p-6 lg:p-7">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-display text-lg font-semibold tracking-tight text-white">
-          {tier.name}
-        </h3>
-        {tier.highlight ? <Badge tone="ember">Most popular</Badge> : null}
-      </div>
+      <h3 className="font-display text-lg font-semibold tracking-tight text-white">
+        {tier.name}
+      </h3>
       <p className="mt-1 text-sm text-zinc-500">{tier.tagline}</p>
 
       <div className="mt-6 flex items-baseline gap-1">
@@ -181,15 +178,10 @@ function TierBody({ tier }: { tier: Tier }) {
 export default function Pricing() {
   return (
     <section id="pricing" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/20 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="Pricing"
           title="Start free. Scale when the clips hit."
-          lede="Three clips a month on the house — no credit card, no surprise limits at checkout. Upgrade when your pipeline does."
+          lede="Three clips a month on the house, no credit card and no surprise limits at checkout. Upgrade when your pipeline does."
         />
 
         <div className="mt-14 grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:mt-16 lg:grid-cols-4 lg:gap-6">
@@ -197,7 +189,7 @@ export default function Pricing() {
             tier.highlight ? (
               <div
                 key={tier.name}
-                className="relative rounded-2xl bg-gradient-to-b from-brand-400 via-spark-500 to-ember-400 p-[1px] shadow-[0_0_40px_rgba(139,92,246,0.25)] lg:z-10 lg:scale-[1.04]"
+                className="relative rounded-2xl bg-brand-500 p-[1px] lg:z-10 lg:scale-[1.04]"
               >
                 <div className="h-full rounded-[calc(1rem-1px)] bg-ink-850">
                   <TierBody tier={tier} />
@@ -221,8 +213,8 @@ export default function Pricing() {
             </Badge>
             <p className="text-sm leading-relaxed text-zinc-400">
               Need more? <span className="text-white">50 extra credits</span>{" "}
-              for <span className="font-mono text-white">$20</span> —{" "}
-              <span className="font-mono">1 credit = 1 clip</span>. Credits
+              for <span className="font-mono text-white">$20</span>.{" "}
+              <span className="font-mono">1 credit = 1 clip</span>, and credits
               never expire.
             </p>
           </div>

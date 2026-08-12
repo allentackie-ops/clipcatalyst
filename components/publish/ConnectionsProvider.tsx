@@ -108,7 +108,7 @@ export default function ConnectionsProvider({
       setError(
         e instanceof Error
           ? e.message
-          : "Couldn't load your connected channels — try again."
+          : "Couldn't load your connected channels. Try again."
       );
       return null;
     } finally {

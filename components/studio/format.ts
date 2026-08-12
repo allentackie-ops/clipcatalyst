@@ -31,7 +31,7 @@ export function formatDuration(seconds: number): string {
 
 /** 1234567 → "1.2 MB". For mono display. */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"] as const;
   let value = bytes;

@@ -82,7 +82,7 @@ export default function Sidebar() {
           role="img"
           aria-label="82 of 100 credits remaining"
         >
-          <div className="h-full w-[82%] rounded-full bg-gradient-to-r from-brand-500 to-spark-500" />
+          <div className="h-full w-[82%] rounded-full bg-brand-500" />
         </div>
         <Link
           href="/#pricing"

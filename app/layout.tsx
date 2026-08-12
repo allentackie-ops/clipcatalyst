@@ -18,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
-const TITLE = "ClipCatalyst — Studio-quality AI clips in 90 seconds";
+const TITLE = "ClipCatalyst: Studio-quality AI clips in 90 seconds";
 const DESCRIPTION =
   "ClipCatalyst turns long-form video into viral-ready vertical clips in under 90 seconds. Virality Engine, chat-based editing, 4K export, one-click publish.";
 

@@ -76,7 +76,7 @@ const PREVIEW_WORDS = ["Your", "brand", "colour"] as const;
 /** Presets: the site's own palette plus the diarization colours, so a pick
  *  here always lands somewhere that reads on a black caption box. */
 const PRESETS: { hex: string; name: string }[] = [
-  { hex: DEFAULT_CAPTION_COLOR, name: "Violet — the default" },
+  { hex: DEFAULT_CAPTION_COLOR, name: "Violet (the default)" },
   { hex: "#e879f9", name: "Fuchsia" },
   { hex: "#38bdf8", name: "Sky" },
   { hex: "#34d399", name: "Emerald" },
@@ -210,17 +210,13 @@ function KitPreview({
       role="img"
       aria-label={`Preview of a 9:16 clip: captions with the active word in ${activeColor}, and ${corner}.`}
       style={{ width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }}
-      className="relative shrink-0 overflow-hidden rounded-2xl border border-line-strong bg-gradient-to-br from-ink-700 via-ink-800 to-brand-700/30"
+      className="relative shrink-0 overflow-hidden rounded-2xl border border-line-strong bg-ink-800"
     >
       {/* Stand-in for the video: a soft key light, so the caption box and the
           corner mark sit on something rather than on flat colour. */}
       <span
         aria-hidden
         className="pointer-events-none absolute left-1/2 top-[22%] h-28 w-28 -translate-x-1/2 rounded-full bg-white/10 blur-2xl"
-      />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-ink-950/80 to-transparent"
       />
 
       {/* Caption strip — the renderer's geometry, at preview scale. */}
@@ -495,7 +491,7 @@ export default function BrandKitPanel({
       if (deadRef.current) return;
       if (logo === null) {
         setLogoError(
-          "That image couldn't be read — try re-exporting it, or pick another file."
+          "That image couldn't be read. Try re-exporting it, or pick another file."
         );
         return;
       }
@@ -558,7 +554,7 @@ export default function BrandKitPanel({
     status === "syncing"
       ? "Saving to your account…"
       : status === "synced"
-        ? "Saved — your cloud renders use it too."
+        ? "Saved. Your cloud renders use it too."
         : status === "saved"
           ? "Saved on this device."
           : "";
@@ -726,7 +722,7 @@ export default function BrandKitPanel({
           <div id={hexHintId} className="flex flex-col gap-1">
             {hexInvalid ? (
               <p className="text-xs leading-relaxed text-ember-300">
-                That isn&rsquo;t a hex colour — try{" "}
+                That isn&rsquo;t a hex colour. Try{" "}
                 <span className="font-mono">{DEFAULT_CAPTION_COLOR}</span> or{" "}
                 <span className="font-mono">#fff</span>. Your last colour is
                 still in use.
@@ -737,15 +733,15 @@ export default function BrandKitPanel({
                 Low contrast:{" "}
                 <span className="font-mono">{contrast.toFixed(2)}:1</span> on
                 the caption&rsquo;s black box. Under {MIN_CONTRAST}:1 is hard
-                to read at a glance — we&rsquo;ll still render it.
+                to read at a glance, though we&rsquo;ll still render it.
               </p>
             ) : null}
           </div>
 
           <p className="text-xs leading-relaxed text-zinc-500">
-            When a clip has two or more speakers, the speaker colours win —
-            that colour says who is talking, which your brand colour would
-            paint over.
+            When a clip has two or more speakers, the speaker colours win:
+            that colour says who is talking, and your brand colour would paint
+            over it.
           </p>
         </div>
 
@@ -773,8 +769,8 @@ export default function BrandKitPanel({
         {watermarkRequired ? (
           <p className="text-xs leading-relaxed text-zinc-400">
             Free clips carry the ClipCatalyst mark and the default caption
-            colour — that&rsquo;s what the preview shows. Your kit is saved
-            here and lands on your clips from Starter up.{" "}
+            colour, which is what the preview shows. Your kit is saved here and
+            lands on your clips from Starter up.{" "}
             <Link
               href="/#pricing"
               className="text-brand-300 underline-offset-4 hover:underline"
@@ -785,7 +781,7 @@ export default function BrandKitPanel({
         ) : (
           <p className="text-xs leading-relaxed text-zinc-400">
             Your logo replaces our mark and your colour highlights the active
-            word — on every clip you render, in this browser and in the cloud.
+            word, on every clip you render, in this browser and in the cloud.
           </p>
         )}
       </div>
@@ -799,8 +795,8 @@ export default function BrandKitPanel({
           Brand kit
         </h2>
         <p className="mt-2 mb-6 text-sm leading-relaxed text-zinc-400">
-          Your logo in the corner and your colour on the caption highlight —
-          on browser renders and cloud renders alike.
+          Your logo in the corner and your colour on the caption highlight, on
+          browser renders and cloud renders alike.
         </p>
         {body}
       </Card>

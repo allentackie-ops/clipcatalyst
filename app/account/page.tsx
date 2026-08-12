@@ -4,9 +4,9 @@ import AccountProvider from "@/components/account/AccountProvider";
 import AccountApp from "@/components/account/AccountApp";
 
 export const metadata: Metadata = {
-  title: "Account — ClipCatalyst",
+  title: "Account | ClipCatalyst",
   description:
-    "Your ClipCatalyst plan, this month's clip usage, and billing — all in one place.",
+    "Your ClipCatalyst plan, this month's clip usage, and billing, all in one place.",
 };
 
 export default function AccountPage() {

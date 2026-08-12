@@ -34,7 +34,7 @@ const QUICK_ACTIONS = [
 ] as const;
 
 const TYPED_REPLY =
-  "Applied. I re-cut the clip against that note and re-scored it — the retention curve is stronger through the first 3 seconds.";
+  "Applied. I re-cut the clip against that note and re-scored it, and the retention curve is stronger through the first 3 seconds.";
 
 function ScoreChip({ from, to }: { from: number; to: number }) {
   return (
@@ -47,7 +47,7 @@ function ScoreChip({ from, to }: { from: number; to: number }) {
 
 function AssistantAvatar() {
   return (
-    <span className="flex h-4 w-4 items-center justify-center rounded bg-gradient-to-br from-brand-500 to-spark-500">
+    <span className="flex h-4 w-4 items-center justify-center rounded bg-brand-500">
       <IconSpark className="h-2.5 w-2.5 text-white" />
     </span>
   );
@@ -74,7 +74,7 @@ export default function CatalystChat({
     {
       id: 2,
       role: "assistant",
-      text: "Done — swapped in a sharper opening line, trimmed 1.8s of preamble, and re-timed the captions so the payoff lands at 0:04.",
+      text: "Done. I swapped in a sharper opening line, trimmed 1.8s of preamble, and re-timed the captions so the payoff lands at 0:04.",
       scoreFrom: Math.max(40, score - 17),
       scoreTo: score,
     },
@@ -127,7 +127,7 @@ export default function CatalystChat({
   return (
     <div className="rounded-2xl border border-line bg-ink-950/50">
       <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
-        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-spark-500 shadow-[0_0_12px_rgba(139,92,246,0.4)]">
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-brand-500">
           <IconSpark className="h-3 w-3 text-white" />
         </span>
         <span className="text-sm font-medium text-white">Catalyst</span>
@@ -229,7 +229,7 @@ export default function CatalystChat({
           type="submit"
           disabled={pending}
           aria-label="Send message to Catalyst"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-brand-600 to-spark-500 text-white shadow-[0_0_16px_rgba(139,92,246,0.35)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white transition-colors hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <IconSend className="h-4 w-4" />
         </button>

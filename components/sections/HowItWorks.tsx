@@ -4,8 +4,6 @@ type Step = {
   num: string;
   name: string;
   desc: string;
-  /** Step dot on the lg connector line. */
-  dot: string;
   optional?: boolean;
   progressMock?: boolean;
 };
@@ -14,34 +12,29 @@ const STEPS: Step[] = [
   {
     num: "01",
     name: "Upload",
-    desc: "Paste a YouTube link, drop a file up to 10GB — MP4, MOV, AVI, WebM — or connect Drive or Dropbox.",
-    dot: "bg-brand-400 shadow-[0_0_12px_rgba(167,139,250,0.7)]",
+    desc: "Paste a YouTube link, drop a file up to 10GB (MP4, MOV, AVI, WebM), or connect Drive or Dropbox.",
   },
   {
     num: "02",
     name: "Configure",
-    desc: "Pick platforms, clip length — 15, 30, or 60s — your brand kit, and the vibe. Or skip straight past it.",
-    dot: "bg-brand-400 shadow-[0_0_12px_rgba(167,139,250,0.7)]",
+    desc: "Pick platforms, clip length (15, 30, or 60s), your brand kit, and the vibe. Or skip straight past it.",
     optional: true,
   },
   {
     num: "03",
     name: "AI processes",
     desc: "The engine finds, cuts, captions, and scores every moment. Preview clips live as they finish.",
-    dot: "bg-spark-400 shadow-[0_0_12px_rgba(232,121,249,0.7)]",
     progressMock: true,
   },
   {
     num: "04",
     name: "Review & edit",
-    desc: "Check each 0–100 virality score, trim in the built-in editor, or just type the change in chat.",
-    dot: "bg-ember-400 shadow-[0_0_12px_rgba(251,191,36,0.7)]",
+    desc: "Check each virality score out of 100, trim in the built-in editor, or just type the change in chat.",
   },
   {
     num: "05",
     name: "Publish",
     desc: "Download up to 4K, one-click post to TikTok, Shorts, and Reels, schedule, or share a review link.",
-    dot: "bg-signal-400 shadow-[0_0_12px_rgba(52,211,153,0.7)]",
   },
 ];
 
@@ -50,7 +43,6 @@ export default function HowItWorks() {
     <section id="how-it-works" className="relative py-24 md:py-32">
       <Container>
         <SectionHeading
-          eyebrow="From VOD to viral"
           title={
             <>
               Upload to <GradientText>posted</GradientText> in five steps
@@ -63,7 +55,7 @@ export default function HowItWorks() {
           {/* Connector line across the five step dots (lg only) */}
           <div
             aria-hidden
-            className="absolute left-[calc(10%-4.8px)] right-[calc(10%-4.8px)] top-[3.5px] hidden h-px bg-[linear-gradient(90deg,rgba(167,139,250,0.5),rgba(232,121,249,0.45)_45%,rgba(251,191,36,0.4)_72%,rgba(52,211,153,0.5))] lg:block"
+            className="absolute left-[calc(10%-4.8px)] right-[calc(10%-4.8px)] top-[3.5px] hidden h-px bg-brand-500/40 lg:block"
           />
 
           <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:gap-3">
@@ -76,9 +68,7 @@ export default function HowItWorks() {
               >
                 {/* Step dot on the connector line (lg only) */}
                 <div aria-hidden className="relative mb-6 hidden h-2 lg:block">
-                  <span
-                    className={`absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ${step.dot}`}
-                  />
+                  <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-400" />
                 </div>
 
                 <Card className="flex flex-1 flex-col p-5">
@@ -114,7 +104,7 @@ export default function HowItWorks() {
                           role="img"
                           aria-label="Processing progress: 62 percent, about 90 seconds remaining"
                         >
-                          <div className="h-full w-[62%] animate-pulse-soft rounded-full bg-gradient-to-r from-brand-500 to-spark-500" />
+                          <div className="h-full w-[62%] animate-pulse-soft rounded-full bg-brand-500" />
                         </div>
                       </div>
                     </div>

@@ -17,9 +17,9 @@ import DocPage, {
 } from "@/components/legal/Doc";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — ClipCatalyst",
+  title: "Privacy Policy | ClipCatalyst",
   description:
-    "What ClipCatalyst does with your video, your clips and your account — what never leaves your device, what is deleted when, and what we never do.",
+    "What ClipCatalyst does with your video, your clips and your account: what never leaves your device, what is deleted when, and what we never do.",
 };
 
 const SECTIONS: DocSection[] = [
@@ -41,12 +41,12 @@ const SECTIONS: DocSection[] = [
             </>,
             <>
               The <Em>cloud engine</Em> needs your file. It deletes the uploaded
-              source as soon as the job finishes — whether the job succeeded or
+              source as soon as the job finishes, whether the job succeeded or
               failed.
             </>,
             <>
-              Clips saved to your library are kept for as long as your plan says
-              — 7, 30 or 90 days, or indefinitely. After that the video file is
+              Clips saved to your library are kept for as long as your plan
+              says: 7, 30 or 90 days, or indefinitely. After that the video file is
               deleted and only the clip&apos;s details stay, so your library
               still lists what you made.
             </>,
@@ -88,7 +88,7 @@ const SECTIONS: DocSection[] = [
           abandon one.
         </P>
         <P>
-          Two things are downloaded to make that possible — downloaded, never
+          Two things are downloaded to make that possible. Downloaded, never
           uploaded. The speech-recognition model weights are fetched from the
           Hugging Face model hub the first time you transcribe, and your browser
           caches them afterwards; that request carries your IP address, the way
@@ -102,10 +102,10 @@ const SECTIONS: DocSection[] = [
           anywhere near it.
         </Note>
         <P>
-          Pressing it uploads that one finished clip, plus its details — title,
-          score, hooks, the reason and tip, its timings and dimensions, and the
-          clip&apos;s transcript — to your account. Nothing else goes with it,
-          and the source video you started from never does.
+          Pressing it uploads that one finished clip to your account, plus its
+          details: title, score, hooks, the reason and tip, its timings and
+          dimensions, and the clip&apos;s transcript. Nothing else goes with
+          it, and the source video you started from never does.
         </P>
 
         <Sub>On our servers (the cloud engine)</Sub>
@@ -113,7 +113,7 @@ const SECTIONS: DocSection[] = [
           Here, uploading the source is the point. Your file is stored, a worker
           reads it, transcribes it, finds the moments, tracks the speaker and
           renders the clips, and the source file is deleted the moment the job
-          reaches a terminal state — success or failure, every exit path.
+          reaches a terminal state, on success or failure, by every exit path.
         </P>
       </>
     ),
@@ -133,9 +133,9 @@ const SECTIONS: DocSection[] = [
           items={[
             <>
               <Em>The uploaded source</Em> is deleted as soon as the job
-              finishes, win or lose. A job that is abandoned — a file uploaded
-              and never started, a worker that died — has its source removed by
-              the maintenance sweep instead.
+              finishes, win or lose. A job that is abandoned (a file uploaded
+              and never started, or a worker that died) has its source removed
+              by the maintenance sweep instead.
             </>,
             <>
               <Em>The job record and the clips attached to it</Em> are deleted 48
@@ -179,14 +179,14 @@ const SECTIONS: DocSection[] = [
     body: (
       <>
         <P>
-          A clip you save — whether your browser rendered it or ours did — gets a
+          A clip you save, whether your browser rendered it or ours did, gets a
           row in your library and a deadline taken from your plan at that moment:
         </P>
         <List
           items={[
             <>
-              Free — <Em>7 days</Em>. Starter — <Em>30 days</Em>. Pro —{" "}
-              <Em>90 days</Em>. Enterprise — kept as long as the account is.
+              Free: <Em>7 days</Em>. Starter: <Em>30 days</Em>. Pro:{" "}
+              <Em>90 days</Em>. Enterprise: kept as long as the account is.
             </>,
             <>
               At the deadline <Em>the video file is deleted and the record
@@ -202,8 +202,8 @@ const SECTIONS: DocSection[] = [
             </>,
             <>
               Upgrading extends the deadline on clips you already saved.
-              Downgrading never shortens one — a shorter window only applies to
-              clips saved after the change.
+              Downgrading never shortens one, because a shorter window only
+              applies to clips saved after the change.
             </>,
           ]}
         />
@@ -226,7 +226,7 @@ const SECTIONS: DocSection[] = [
           items={[
             <>your email address, and when the account was created;</>,
             <>
-              a <Em>scrypt hash</Em> of your password — or nothing at all, for
+              a <Em>scrypt hash</Em> of your password, or nothing at all for
               accounts created by Google sign-in or by an emailed code, which
               have no password;
             </>,
@@ -257,7 +257,7 @@ const SECTIONS: DocSection[] = [
         <Sub>Sessions and sign-in codes</Sub>
         <P>
           Signing in mints an opaque token. We store only its{" "}
-          <Em>SHA-256 hash</Em> — the token itself lives in your browser and
+          <Em>SHA-256 hash</Em>. The token itself lives in your browser and
           nowhere on our side, so a copy of our database cannot be used to
           impersonate you. Sessions expire 30 days after they are created, and
           signing out revokes one immediately.
@@ -278,8 +278,8 @@ const SECTIONS: DocSection[] = [
       <>
         <P>
           Payment is handled by <Em>Stripe</Em>. Checkout and the billing portal
-          are pages Stripe hosts — your card details are entered there and never
-          touch our servers, in any form.
+          are pages Stripe hosts, so your card details are entered there and
+          never touch our servers, in any form.
         </P>
         <List
           items={[
@@ -315,7 +315,7 @@ const SECTIONS: DocSection[] = [
         <P>
           ClipCatalyst sends one kind of email: your six-digit sign-in code.
           There is no newsletter, no product mail and no re-engagement mail in
-          the product — there is no code that could send one.
+          the product, because there is no code that could send one.
         </P>
         <P>
           Delivery is by <Em>Resend</Em>, which receives the sender line, your
@@ -361,7 +361,7 @@ const SECTIONS: DocSection[] = [
         <Note>
           Nothing is connected unless you go through Google&apos;s own consent
           screen and connect it yourself. A connection is used for the posts you
-          ask for, one clip at a time — nothing is ever posted automatically.
+          ask for, one clip at a time. Nothing is ever posted automatically.
         </Note>
         <P>
           <Em>What we ask Google for.</Em> Permission to upload videos to your
@@ -373,7 +373,7 @@ const SECTIONS: DocSection[] = [
         <P>
           <Em>What a connection stores.</Em> The platform, your channel&apos;s id
           and display name, the permissions Google granted, when the access token
-          expires, and the access and refresh tokens themselves —{" "}
+          expires, and the access and refresh tokens themselves,{" "}
           <Em>encrypted at rest</Em>, with a key the database does not contain.
           No part of our API returns a token in any response, ever. Each post you
           ask for also writes a short-lived record of that attempt, described in{" "}
@@ -398,7 +398,7 @@ const SECTIONS: DocSection[] = [
         </P>
         <P>
           <Em>Disconnecting.</Em> Disconnecting revokes the grant with Google
-          and then deletes the stored connection — in that order, because those
+          and then deletes the stored connection, in that order, because those
           stored tokens are the only thing that can revoke it. You can also
           revoke it yourself at any time from{" "}
           <ExtLink href="https://myaccount.google.com/permissions">
@@ -448,9 +448,9 @@ const SECTIONS: DocSection[] = [
               . Clearing your browser storage signs you out.
             </>,
             <>
-              <Em>IndexedDB</Em> holds your Studio brand kit — the logo image and
-              caption colour — so it survives a reload. Browser renders read it
-              from there. If you are signed in on a plan that includes the brand
+              <Em>IndexedDB</Em> holds your Studio brand kit, the logo image
+              and caption colour, so it survives a reload. Browser renders read
+              it from there. If you are signed in on a plan that includes the brand
               kit, saving it also uploads it to your account, so cloud renders
               can use the same kit.
             </>,
@@ -520,7 +520,7 @@ const SECTIONS: DocSection[] = [
               is used to train or fine-tune any model, ours or anybody
               else&apos;s. There is no training pipeline in this product, and the
               virality score is a fixed algorithm reading audio features and the
-              transcript — not a model that learns from what you upload.
+              transcript, not a model that learns from what you upload.
             </>,
             <>
               <Em>No analytics.</Em> There is no product analytics, no
@@ -531,7 +531,7 @@ const SECTIONS: DocSection[] = [
               <Em>No selling or sharing.</Em> Your video, your clips and your
               account details are not sold, rented, or handed to anybody for
               their own purposes. The only third parties involved at all are the
-              ones named above — Stripe for payment, Resend for the sign-in
+              ones named above: Stripe for payment, Resend for the sign-in
               email, Google if you choose to sign in with it or connect a
               channel, and the model host your browser downloads weights from.
             </>,
@@ -548,21 +548,22 @@ const SECTIONS: DocSection[] = [
         <List
           items={[
             <>
-              <Em>Delete a clip</Em> — any clip in your library, at any time.
+              <Em>Delete a clip.</Em> Any clip in your library, at any time.
               The file and the record both go.
             </>,
             <>
-              <Em>Clear your brand kit</Em> — the panel&apos;s clear button
+              <Em>Clear your brand kit.</Em> The panel&apos;s clear button
               removes the stored colour and deletes the logo file. It is not
               gated on your plan: taking your own logo off our servers must never
               depend on what you are paying today.
             </>,
             <>
-              <Em>Sign out</Em> — revokes that session on our side immediately.
+              <Em>Sign out.</Em> This revokes that session on our side
+              immediately.
             </>,
             <>
-              <Em>Delete your account, or ask for a copy of what we hold</Em> —
-              write to <MailLink />. Deletion removes the account record, its
+              <Em>Delete your account, or ask for a copy of what we hold.</Em>{" "}
+              Write to <MailLink />. Deletion removes the account record, its
               sessions, its library records and every stored file behind them.
               There is no self-serve button for this yet; when there is, this
               page will say so.
@@ -591,7 +592,7 @@ const SECTIONS: DocSection[] = [
         <P>
           Questions, deletion requests, or a claim that something on this page is
           wrong: <MailLink />. If you think a statement here does not match what
-          the product actually does, say so — that is a defect, and it will be
+          the product actually does, say so. That is a defect, and it will be
           fixed.
         </P>
         <P>
@@ -607,9 +608,8 @@ const SECTIONS: DocSection[] = [
 export default function PrivacyPage() {
   return (
     <DocPage
-      eyebrow="Privacy"
       title="Privacy Policy"
-      lede="What happens to your video, your clips and your account — which parts of ClipCatalyst never send your footage anywhere, what the parts that do send it keep, and for how long. It describes the product as it is built today."
+      lede="What happens to your video, your clips and your account: which parts of ClipCatalyst never send your footage anywhere, what the parts that do send it keep, and for how long. It describes the product as it is built today."
       sections={SECTIONS}
     />
   );

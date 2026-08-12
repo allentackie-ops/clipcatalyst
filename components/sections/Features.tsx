@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { Badge, Card, Container, SectionHeading } from "@/components/ui";
+import { Card, Container, SectionHeading } from "@/components/ui";
 
 /* ---------------------------------------------------------------- */
-/* Icons — simple 24px line glyphs, one per feature                 */
+/* Icons: simple 24px line glyphs, one per feature                  */
 /* ---------------------------------------------------------------- */
 
 function Icon({ children }: { children: ReactNode }) {
@@ -137,7 +137,7 @@ const icons = {
 } as const;
 
 /* ---------------------------------------------------------------- */
-/* Content — 9 core + 8 pro (from DESIGN.md)                        */
+/* Content: 9 core + 8 pro (from DESIGN.md)                         */
 /* ---------------------------------------------------------------- */
 
 type Feature = {
@@ -179,7 +179,7 @@ const CORE_FEATURES: Feature[] = [
   },
   {
     name: "Virality score",
-    desc: "Every clip rated 0–100, with tips to push it higher.",
+    desc: "Every clip rated out of 100, with tips to push it higher.",
     icon: icons.gauge,
   },
   {
@@ -189,7 +189,7 @@ const CORE_FEATURES: Feature[] = [
   },
   {
     name: "Multi-speaker detection",
-    desc: "Knows who is talking — and frames and captions accordingly.",
+    desc: "Knows who is talking, then frames and captions accordingly.",
     icon: icons.mic,
   },
 ];
@@ -207,7 +207,7 @@ const PRO_FEATURES: Feature[] = [
   },
   {
     name: "Chat-based editing",
-    desc: "Type “make clip 2 more energetic” — the AI does the rest.",
+    desc: "Type “make clip 2 more energetic” and the AI does the rest.",
     icon: icons.chat,
   },
   {
@@ -227,7 +227,7 @@ const PRO_FEATURES: Feature[] = [
   },
   {
     name: "Analytics dashboard",
-    desc: "See which clips convert — then double down on what works.",
+    desc: "See which clips convert, then double down on what works.",
     icon: icons.bars,
   },
   {
@@ -261,39 +261,26 @@ function CoreCard({ feature }: { feature: Feature }) {
 
 function ProCard({ feature }: { feature: Feature }) {
   return (
-    <div className="rounded-2xl bg-gradient-to-br from-spark-500/40 via-white/10 to-brand-500/30 p-px transition-all duration-300 hover:from-spark-500/60 hover:to-brand-500/50">
-      <div className="flex h-full items-start gap-3.5 rounded-[calc(1rem-1px)] bg-ink-850 p-5">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-spark-500/30 bg-spark-500/10 text-spark-400">
-          {feature.icon}
+    <div className="flex h-full items-start gap-3.5 rounded-2xl border border-brand-500/30 bg-ink-850 p-5 transition-colors duration-200 hover:border-brand-400/50">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand-500/30 bg-brand-500/10 text-brand-300">
+        {feature.icon}
+      </span>
+      <span>
+        <span className="block text-[15px] font-medium text-white">
+          {feature.name}
         </span>
-        <span>
-          <span className="block text-[15px] font-medium text-white">
-            {feature.name}
-          </span>
-          <span className="mt-1 block text-sm leading-relaxed text-zinc-400">
-            {feature.desc}
-          </span>
+        <span className="mt-1 block text-sm leading-relaxed text-zinc-400">
+          {feature.desc}
         </span>
-      </div>
+      </span>
     </div>
   );
 }
 
-function GroupHeading({
-  badge,
-  tone,
-  label,
-  count,
-}: {
-  badge: string;
-  tone: "neutral" | "spark";
-  label: string;
-  count: number;
-}) {
+function GroupHeading({ label, count }: { label: string; count: number }) {
   return (
     <div className="mb-6 flex items-center gap-4">
-      <h3 className="flex items-center gap-3 font-display text-lg font-semibold tracking-tight text-white">
-        <Badge tone={tone}>{badge}</Badge>
+      <h3 className="font-display text-lg font-semibold tracking-tight text-white">
         {label}
       </h3>
       <div aria-hidden className="h-px flex-1 bg-line" />
@@ -311,24 +298,14 @@ function GroupHeading({
 export default function Features() {
   return (
     <section id="features" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute top-1/2 left-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600/10 blur-[140px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="Everything in the box"
           title="The whole clipping stack, built in"
           lede="Nine core features in every workflow, eight Pro tools your current editor can't match."
         />
 
         <div className="mt-14 md:mt-16">
-          <GroupHeading
-            badge="Core"
-            tone="neutral"
-            label="The core stack"
-            count={CORE_FEATURES.length}
-          />
+          <GroupHeading label="The core stack" count={CORE_FEATURES.length} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {CORE_FEATURES.map((feature) => (
               <CoreCard key={feature.name} feature={feature} />
@@ -338,9 +315,7 @@ export default function Features() {
 
         <div className="mt-14 md:mt-16">
           <GroupHeading
-            badge="Pro"
-            tone="spark"
-            label="The differentiators"
+            label="The Pro differentiators"
             count={PRO_FEATURES.length}
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

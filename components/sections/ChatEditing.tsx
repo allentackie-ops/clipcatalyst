@@ -43,7 +43,7 @@ function CatalystAvatar() {
   return (
     <span
       aria-hidden
-      className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-spark-500 shadow-[0_0_12px_rgba(139,92,246,0.4)]"
+      className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-brand-600"
     >
       <Mark className="h-3 w-3 text-white" />
     </span>
@@ -78,23 +78,18 @@ function ScoreDelta({ from, to }: { from: number; to: number }) {
 export default function ChatEditing() {
   return (
     <section id="chat-editing" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-spark-500/15 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="Copilot for clips"
           title={
             <>
               Edit by <GradientText>typing</GradientText>, not by timeline
             </>
           }
-          lede="Say what you want changed. Catalyst applies the edit, shows the result, and re-scores the clip — the edit loop drops from hours to minutes."
+          lede="Say what you want changed. Catalyst applies the edit, shows the result, and re-scores the clip. The edit loop drops from hours to minutes."
         />
 
         <div className="mx-auto mt-16 max-w-2xl">
-          <Card className="overflow-hidden shadow-[0_24px_80px_-32px_rgba(139,92,246,0.25)]">
+          <Card className="overflow-hidden">
             {/* Title bar */}
             <div className="flex items-center justify-between gap-4 border-b border-line bg-white/[0.02] px-5 py-3.5">
               <div className="flex items-center gap-2" aria-hidden>
@@ -103,7 +98,7 @@ export default function ChatEditing() {
                 <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
               </div>
               <p className="font-mono text-xs text-zinc-400">
-                Catalyst <span className="text-zinc-600">—</span> clip 2 of 6
+                Catalyst <span className="text-zinc-600">·</span> clip 2 of 6
               </p>
               <Badge tone="brand">Pro</Badge>
             </div>
@@ -171,8 +166,8 @@ export default function ChatEditing() {
           </div>
 
           <p className="mx-auto mt-8 max-w-xl text-center text-sm leading-relaxed text-zinc-500">
-            Every command runs on the real timeline — cuts, zooms, captions,
-            pacing — and the virality score updates the second it lands. Undo
+            Every command runs on the real timeline (cuts, zooms, captions,
+            pacing), and the virality score updates the second it lands. Undo
             with a word.
           </p>
         </div>

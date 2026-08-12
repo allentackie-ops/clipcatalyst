@@ -51,7 +51,7 @@ function CheckIcon() {
 
 function ProgressBar({ progress }: { progress: number }) {
   if (progress < 0) {
-    // Indeterminate: sweeping shimmer built on the marquee keyframes.
+    // Indeterminate: a solid accent pill sweeping on the marquee keyframes.
     return (
       <div
         className="h-1 w-full overflow-hidden rounded-full bg-white/10"
@@ -59,8 +59,12 @@ function ProgressBar({ progress }: { progress: number }) {
         aria-label="Working"
       >
         <div className="flex h-full w-[200%] animate-marquee [animation-duration:1.4s]">
-          <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-500 to-transparent" />
-          <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-500 to-transparent" />
+          <div className="flex h-full w-1/2 justify-center">
+            <div className="h-full w-2/5 rounded-full bg-brand-500" />
+          </div>
+          <div className="flex h-full w-1/2 justify-center">
+            <div className="h-full w-2/5 rounded-full bg-brand-500" />
+          </div>
         </div>
       </div>
     );
@@ -75,7 +79,7 @@ function ProgressBar({ progress }: { progress: number }) {
       aria-valuenow={pct}
     >
       <div
-        className="h-full rounded-full bg-gradient-to-r from-brand-500 to-spark-400 transition-[width] duration-300 ease-out"
+        className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out"
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -166,7 +170,7 @@ export default function StageChecklist({
                     >
                       {stage.label}
                       {done ? (
-                        <span className="sr-only"> — done</span>
+                        <span className="sr-only">, done</span>
                       ) : null}
                     </p>
                     {active ? (
@@ -194,7 +198,7 @@ export default function StageChecklist({
                       ) : null}
                       {stage.id === "model" ? (
                         <p className="text-xs text-zinc-600">
-                          ~40–150 MB depending on your device — cached after.
+                          ~40 to 150 MB depending on your device, then cached.
                         </p>
                       ) : null}
                     </div>
@@ -211,7 +215,7 @@ export default function StageChecklist({
           Cancel
         </Button>
         <p className="text-xs text-zinc-600">
-          Everything runs on this device — canceling just reloads the page.
+          Everything runs on this device, so canceling just reloads the page.
         </p>
       </div>
     </div>

@@ -12,7 +12,7 @@ const rows = [
     name: "ClipCatalyst",
     time: "90 sec",
     self: true,
-    // 90s of 1080s ≈ 8.3% — min-w keeps the bar visibly non-trivial
+    // 90s of 1080s is ~8.3%; min-w keeps the bar visibly non-trivial.
     width: "w-[8.33%] min-w-[4.75rem]",
   },
   {
@@ -32,7 +32,7 @@ const rows = [
 const hows = [
   {
     title: "Optimized GPU pipelines",
-    copy: "Decode, reframe, and render on tuned GPU workers — zero queue time, zero idle cycles.",
+    copy: "Decode, reframe, and render on tuned GPU workers. No queue time, no idle cycles.",
     icon: (
       <svg
         width="18"
@@ -71,7 +71,7 @@ const hows = [
   },
   {
     title: "Intelligent caching",
-    copy: "Faces, cuts, and caption patterns are cached — repeat runs come back even faster.",
+    copy: "Faces, cuts, and caption patterns are cached, so repeat runs come back even faster.",
     icon: (
       <svg
         width="18"
@@ -95,13 +95,8 @@ const hows = [
 export default function Speed() {
   return (
     <section id="speed" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/20 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="The 90-Second Guarantee"
           title={
             <>
               Done in <GradientText>90 seconds</GradientText>. Not 20 minutes.
@@ -142,9 +137,9 @@ export default function Speed() {
                 <div className="col-span-2 row-start-2 h-9 overflow-hidden rounded-lg bg-white/[0.04] sm:col-span-1 sm:col-start-2 sm:row-start-1">
                   {row.self ? (
                     <div
-                      className={`flex h-full items-center justify-end rounded-lg bg-gradient-to-r from-brand-500 to-spark-500 pr-2.5 shadow-[0_0_20px_rgba(139,92,246,0.45)] ${row.width}`}
+                      className={`flex h-full items-center justify-end rounded-lg bg-brand-500 pr-2.5 ${row.width}`}
                     >
-                      {/* Our own bar in a field of competitors — the mark is
+                      {/* Our own bar in a field of competitors. The mark is
                           the label saying which one is us. */}
                       <Mark className="h-3 w-3 text-white" />
                     </div>

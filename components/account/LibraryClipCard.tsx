@@ -124,7 +124,7 @@ export default function LibraryClipCard({
       setSource(loaded);
     } catch (e) {
       if (deadRef.current) return;
-      setSourceError(failure(e, "Couldn't load that clip — try again."));
+      setSourceError(failure(e, "Couldn't load that clip. Try again."));
     } finally {
       if (!deadRef.current) setLoadingSource(false);
     }
@@ -148,7 +148,7 @@ export default function LibraryClipCard({
       anchor.remove();
     } catch (e) {
       if (deadRef.current) return;
-      setSourceError(failure(e, "Couldn't download that clip — try again."));
+      setSourceError(failure(e, "Couldn't download that clip. Try again."));
     } finally {
       if (!deadRef.current) setDownloading(false);
     }
@@ -172,8 +172,8 @@ export default function LibraryClipCard({
   const expires = clip.expires_at ? formatDate(clip.expires_at) : "";
   const fileLine = !clip.available
     ? expires
-      ? `Video deleted on ${expires} — this card stays.`
-      : "Video deleted — this card stays."
+      ? `Video deleted on ${expires}. This card stays.`
+      : "Video deleted. This card stays."
     : clip.expires_at === null
       ? "Video kept for as long as your account is."
       : expires
@@ -185,7 +185,7 @@ export default function LibraryClipCard({
       {/* 9:16 preview — a player only when there is really a file. */}
       <div className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-2xl border border-line bg-black">
         {!clip.available ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-ink-800 via-ink-850 to-ink-900 px-4 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink-850 px-4 text-center">
             <span
               className="flex h-10 w-10 items-center justify-center rounded-full border border-line-strong bg-white/5 text-zinc-500"
               aria-hidden
@@ -226,7 +226,7 @@ export default function LibraryClipCard({
             onClick={() => void play()}
             aria-label={`Play ${title}`}
             aria-busy={loadingSource}
-            className="group absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-ink-700 via-ink-800 to-brand-700/30 transition-colors duration-200 hover:from-ink-700 hover:to-brand-600/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-400"
+            className="group absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink-800 transition-colors duration-200 hover:bg-ink-700 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-400"
           >
             <span
               className="flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white transition-transform duration-200 group-hover:scale-105"

@@ -36,7 +36,7 @@ const columns: { title: string; links: { label: string; href: string }[] }[] = [
     links: [
       { label: "About", href: "#" },
       { label: "Blog", href: "#" },
-      { label: "Affiliates — 20% lifetime", href: "#" },
+      { label: "Affiliates (20% lifetime)", href: "#" },
       { label: "Contact", href: "#" },
       { label: "Privacy Policy", href: "/privacy" },
       { label: "Terms of Service", href: "/terms" },

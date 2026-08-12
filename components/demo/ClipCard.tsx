@@ -44,17 +44,12 @@ export default function ClipCard({
       <span className="relative block overflow-hidden">
         <span
           aria-hidden
-          className={`block aspect-[9/16] w-full ${clip.gradient} transition-transform duration-500 group-hover:scale-[1.04]`}
+          className={`block aspect-[9/16] w-full ${clip.tint} transition-transform duration-500 group-hover:scale-[1.04]`}
         />
         {/* key-light glow suggesting a subject */}
         <span
           aria-hidden
           className="pointer-events-none absolute left-1/2 top-1/4 h-24 w-24 -translate-x-1/2 rounded-full bg-white/10 blur-2xl"
-        />
-        {/* bottom vignette for caption readability */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-ink-950/85 to-transparent"
         />
         <span className="absolute right-2.5 top-2.5 rounded-md bg-ink-950/70 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200 backdrop-blur-sm">
           {clip.duration}
@@ -99,7 +94,7 @@ export function ProcessingCard() {
       <div className="relative">
         <div
           aria-hidden
-          className="aspect-[9/16] w-full animate-pulse-soft bg-gradient-to-br from-brand-700/35 via-ink-800 to-spark-500/15"
+          className="aspect-[9/16] w-full animate-pulse-soft bg-ink-800"
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
           <span
@@ -134,8 +129,12 @@ export function ProcessingCard() {
             style={{ animationDuration: "1.4s" }}
           >
             <div className="flex h-full">
-              <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-400 to-transparent" />
-              <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-400 to-transparent" />
+              <div className="flex h-full w-1/2 justify-center">
+                <div className="h-full w-2/5 rounded-full bg-brand-400" />
+              </div>
+              <div className="flex h-full w-1/2 justify-center">
+                <div className="h-full w-2/5 rounded-full bg-brand-400" />
+              </div>
             </div>
           </div>
         </div>

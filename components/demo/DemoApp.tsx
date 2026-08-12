@@ -50,7 +50,7 @@ export default function DemoApp() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-ink-950 text-zinc-100">
-      <h1 className="sr-only">ClipCatalyst live demo — sample project</h1>
+      <h1 className="sr-only">ClipCatalyst live demo, sample project</h1>
 
       <Sidebar />
 
@@ -61,9 +61,9 @@ export default function DemoApp() {
           <div className="flex shrink-0 items-center gap-2.5 border-b border-brand-500/20 bg-brand-500/10 px-4 py-2 sm:px-5">
             <IconInfo className="h-4 w-4 shrink-0 text-brand-300" />
             <p className="flex-1 text-xs leading-relaxed text-brand-300 sm:text-[13px]">
-              <span className="font-semibold text-white">Demo mode</span> —
-              you’re viewing a sample project. Uploads are disabled. This is
-              the guided tour — the real engine lives in{" "}
+              <span className="font-semibold text-white">Demo mode.</span>{" "}
+              You’re viewing a sample project, and uploads are disabled. This
+              is the guided tour. The real engine lives in{" "}
               <Link
                 href="/studio"
                 className="text-brand-300 underline underline-offset-2 transition hover:text-white"
@@ -85,11 +85,6 @@ export default function DemoApp() {
 
         <div className="flex min-h-0 flex-1">
           <main className="cc-scroll relative min-w-0 flex-1 overflow-y-auto overscroll-contain">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-brand-600/10 blur-[100px]"
-            />
-
             <div className="relative px-4 py-6 sm:px-6 lg:px-8">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-baseline gap-3">

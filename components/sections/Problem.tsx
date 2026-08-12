@@ -2,16 +2,16 @@ import { Badge, Card, Container } from "@/components/ui";
 
 const OLD_WAY = [
   "Scrub hours of footage to find one 60-second moment",
-  "Sit in 10–20 minute processing queues per video",
+  "Sit in 10-20 minute processing queues per video",
   "“Finished” clips that still need re-editing",
   "Export caps, watermarks, resolution limits",
 ];
 
 const NEW_WAY = [
-  ["Find", "the moments worth clipping — across hours of footage"],
+  ["Find", "the moments worth clipping, across hours of footage"],
   ["Cut", "in and out on the exact frame, reframed to 9:16"],
   ["Caption", "with animated templates and keyword highlights"],
-  ["Score", "every clip 0–100 for virality, with fixes"],
+  ["Score", "every clip 0 to 100 for virality, with fixes"],
   ["Publish", "to TikTok, Shorts, and Reels in one click"],
 ] as const;
 
@@ -59,18 +59,11 @@ function Check() {
 export default function Problem() {
   return (
     <section id="problem" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         {/* Giant stat */}
         <div className="mx-auto max-w-3xl text-center">
-          <p className="mb-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-brand-400">
-            The problem
-          </p>
           <h2 className="font-display tracking-tight">
-            <span className="block bg-gradient-to-r from-brand-400 via-spark-400 to-ember-400 bg-clip-text text-7xl font-semibold leading-none text-transparent sm:text-8xl md:text-[10rem]">
+            <span className="block text-7xl font-semibold leading-none text-brand-300 sm:text-8xl md:text-[10rem]">
               80%
             </span>
             <span className="mt-4 block text-2xl font-semibold text-white sm:text-3xl md:mt-6 md:text-4xl">
@@ -110,12 +103,8 @@ export default function Problem() {
             </p>
           </Card>
 
-          <Card className="relative overflow-hidden border-signal-500/25 p-7 sm:p-8">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-signal-500/10 blur-[80px]"
-            />
-            <div className="relative flex items-center justify-between gap-3">
+          <Card className="border-signal-500/25 p-7 sm:p-8">
+            <div className="flex items-center justify-between gap-3">
               <h3 className="font-display text-lg font-semibold text-white">
                 With ClipCatalyst
               </h3>
@@ -123,7 +112,7 @@ export default function Problem() {
                 <span className="font-mono">&lt;90s</span> / clip · at launch
               </Badge>
             </div>
-            <ul className="relative mt-6 space-y-4">
+            <ul className="mt-6 space-y-4">
               {NEW_WAY.map(([verb, rest]) => (
                 <li key={verb} className="flex items-start gap-3">
                   <Check />
@@ -134,7 +123,7 @@ export default function Problem() {
                 </li>
               ))}
             </ul>
-            <p className="relative mt-6 border-t border-line pt-5 font-mono text-xs uppercase tracking-[0.15em] text-signal-400">
+            <p className="mt-6 border-t border-line pt-5 font-mono text-xs uppercase tracking-[0.15em] text-signal-400">
               Automatically. Every clip.
             </p>
           </Card>

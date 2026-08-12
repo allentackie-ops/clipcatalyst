@@ -122,7 +122,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new Error(
-      "Couldn't reach the ClipCatalyst cloud — check your connection and try again."
+      "Couldn't reach the ClipCatalyst cloud. Check your connection and try again."
     );
   }
   if (!res.ok) {
@@ -199,7 +199,7 @@ export function uploadSource(
     xhr.onerror = () => {
       settle();
       reject(
-        new Error("Upload failed — check your connection and try again.")
+        new Error("Upload failed. Check your connection and try again.")
       );
     };
     xhr.onabort = () => {
@@ -295,7 +295,7 @@ export type CloudFinishedClip = FinishedClip & {
  *
  * Anonymous: absolute url straight at the server; it never reports file
  * size, so `blob` is a size-only stand-in — ClipCard reads nothing but
- * `blob.size`, and formatBytes(NaN) renders "—".
+ * `blob.size`, and formatBytes(NaN) renders "unknown".
  *
  * Signed in: `/v1/files/*` of a user-owned job 404s without the session
  * bearer, and <video src> can't send headers — so each file is fetched with

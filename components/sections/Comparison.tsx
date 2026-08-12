@@ -17,7 +17,7 @@ const ROWS: Row[] = [
       { kind: "text", value: "~90 sec", mono: true },
       { kind: "text", value: "~12 min", mono: true },
       { kind: "text", value: "~18 min", mono: true },
-      { kind: "text", value: "10–20 min", mono: true },
+      { kind: "text", value: "10-20 min", mono: true },
       { kind: "text", value: "Manual" },
     ],
   },
@@ -76,7 +76,7 @@ const ROWS: Row[] = [
 const GAPS: { name: string; gap: string }[] = [
   {
     name: "OpusClip",
-    gap: "Key features sit behind higher Pro tiers, and processing runs 10–20 minutes per video.",
+    gap: "Key features sit behind higher Pro tiers, and processing runs 10 to 20 minutes per video.",
   },
   {
     name: "Klap",
@@ -84,7 +84,7 @@ const GAPS: { name: string; gap: string }[] = [
   },
   {
     name: "VEED",
-    gap: "A general-purpose video suite — clipping is one feature among many, not the focus.",
+    gap: "A general-purpose video suite where clipping is one feature among many, not the focus.",
   },
   {
     name: "Descript",
@@ -149,25 +149,66 @@ function CellValue({ cell, highlight }: { cell: Cell; highlight: boolean }) {
 
 const highlightCell = "border-x border-brand-500/20 bg-brand-500/[0.07]";
 
+/** Column order after the feature name, mirroring Row["cells"] indices 1..4. */
+const RIVALS = ["OpusClip", "Klap", "VEED", "Descript"] as const;
+
+/**
+ * The phone view of ROWS: one card per feature, our answer stated plainly and
+ * the four rivals underneath. Same data as the table, no sideways scroll, and
+ * every value sits inside the viewport at 320 px.
+ */
+function MobileComparison() {
+  return (
+    <div className="mt-10 flex flex-col gap-3 md:hidden">
+      {ROWS.map((row) => (
+        <div
+          key={row.feature}
+          className="rounded-2xl border border-line bg-ink-900/60 p-4"
+        >
+          <p className="text-sm text-zinc-300">{row.feature}</p>
+
+          <div className="mt-3 flex items-center gap-3 rounded-xl border border-brand-500/25 bg-brand-500/[0.07] px-3 py-2.5">
+            <span className="text-sm font-semibold text-white">ClipCatalyst</span>
+            <span className="ml-auto shrink-0">
+              <CellValue cell={row.cells[0]} highlight />
+            </span>
+          </div>
+
+          <dl className="mt-2 grid grid-cols-2 gap-x-4">
+            {RIVALS.map((name, i) => (
+              <div key={name} className="flex items-center gap-2 py-1.5">
+                <dt className="min-w-0 truncate text-xs text-zinc-500">{name}</dt>
+                <dd className="ml-auto shrink-0">
+                  <CellValue cell={row.cells[i + 1]} highlight={false} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Comparison() {
   return (
     <section id="compare" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="Why switch"
           title={
             <>
               Built to beat <span className="whitespace-nowrap">&ldquo;good enough&rdquo;</span>
             </>
           }
-          lede="Every clipping tool promises viral moments. Here is where they actually stand — speed, quality, and what your plan really unlocks."
+          lede="Every clipping tool promises viral moments. Here is where they actually stand on speed, quality, and what your plan really unlocks."
         />
 
-        <div className="relative mt-14 md:mt-16">
+        {/* Six columns need 640 px, so on a phone the table is hidden rather
+            than parked in a sideways scroller: a scroller technically contains
+            it, but it still reads as a page sliced off mid-word at the screen
+            edge. MobileComparison below renders the same ROWS in a shape that
+            fits. */}
+        <div className="mt-14 hidden md:mt-16 md:block">
           <div className="overflow-x-auto rounded-2xl border border-line bg-ink-900/60">
             <table className="w-full min-w-[640px] text-left">
               <caption className="sr-only">
@@ -233,14 +274,9 @@ export default function Comparison() {
               </tbody>
             </table>
           </div>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 w-12 rounded-r-2xl bg-gradient-to-l from-ink-900 to-transparent md:hidden"
-          />
         </div>
-        <p className="mt-3 font-mono text-xs text-zinc-400 md:hidden">
-          Swipe to compare &rarr;
-        </p>
+        <MobileComparison />
+
         <p className="mt-4 text-xs text-zinc-400">
           Based on publicly listed plans and typical processing times for a
           60-minute source video.

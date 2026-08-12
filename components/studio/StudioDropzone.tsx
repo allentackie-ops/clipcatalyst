@@ -152,10 +152,10 @@ export default function StudioDropzone({
           </span>
           <div>
             <p className="font-display text-lg font-semibold text-white">
-              {dragging ? "Drop it — let's clip" : "Drop your video here"}
+              {dragging ? "Drop it and let's clip" : "Drop your video here"}
             </p>
             <p className="mt-1 text-sm text-zinc-400">
-              or click to browse — MP4, MOV, or WebM
+              or click to browse for an MP4, MOV, or WebM
             </p>
           </div>
           <p className="font-mono text-xs text-zinc-500">
@@ -305,7 +305,7 @@ export default function StudioDropzone({
           onClick={onGenerate}
           disabled={!canGenerate}
           aria-disabled={!canGenerate}
-          className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-7 py-3.5 text-base font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:brightness-100"
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-7 py-3.5 text-base font-medium text-white transition-colors duration-200 hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-600"
         >
           {/* The mark earns its place here: it draws clips, which is exactly
               what this button returns. */}
@@ -329,13 +329,13 @@ export default function StudioDropzone({
             <rect x="4" y="10" width="16" height="10" rx="2" />
             <path d="M8 10V7a4 4 0 0 1 8 0v3" />
           </svg>
-          Runs 100% in your browser — your video never leaves your device.
+          Runs 100% in your browser, so your video never leaves your device.
         </p>
 
         <p className="max-w-md text-center text-xs leading-relaxed text-zinc-500">
-          Best with talking content up to 15 minutes. First run downloads the
-          AI model (~40–150&nbsp;MB depending on your device) — cached
-          afterwards.
+          Best with talking content up to 15 minutes. The first run downloads
+          the AI model (~40 to 150&nbsp;MB depending on your device) and caches
+          it for next time.
         </p>
       </div>
     </div>

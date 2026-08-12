@@ -9,11 +9,11 @@
 import { useRef, useState } from "react";
 
 const UNSUPPORTED_HINT =
-  "Your browser can't open a share sheet — download and post from your phone.";
+  "Your browser can't open a share sheet. Download the clip and post from your phone.";
 const SHARE_FAILED_HINT =
-  "The share sheet didn't open — download and post from your phone instead.";
+  "The share sheet didn't open. Download the clip and post from your phone instead.";
 const FETCH_FAILED_HINT =
-  "Couldn't fetch this clip for sharing — download it instead.";
+  "Couldn't fetch this clip for sharing. Download it instead.";
 
 export default function ShareButton({
   url,

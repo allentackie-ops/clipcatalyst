@@ -203,12 +203,12 @@ export default function SaveToLibraryButton({
             className="h-1 w-full overflow-hidden rounded-full bg-white/10"
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-spark-400 transition-[width] duration-300 ease-out"
+              className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out"
               style={{ width: `${pct}%` }}
             />
           </div>
           <p className="font-mono text-[11px] text-zinc-500">
-            Uploading — <span className="tabular-nums">{pct}%</span>
+            Uploading <span className="tabular-nums">{pct}%</span>
           </p>
         </div>
       ) : null}
@@ -226,13 +226,13 @@ export default function SaveToLibraryButton({
       <div className="flex flex-col gap-1 empty:hidden">
         {phase === "saved" ? (
           <p className="text-xs leading-relaxed text-zinc-500">
-            The file is on your account now. It stays on this device too —
+            The file is on your account now. It stays on this device too, so
             nothing here was moved or deleted.
           </p>
         ) : null}
         {error ? (
           <p role="alert" className="text-xs leading-relaxed text-ember-300">
-            {error} The clip is untouched on your device — download it, or try
+            {error} The clip is untouched on your device, so download it or try
             again.
           </p>
         ) : null}

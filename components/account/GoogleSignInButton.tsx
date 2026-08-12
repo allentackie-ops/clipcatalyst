@@ -9,10 +9,12 @@
 //      from an effect inside a component only /account renders, which means
 //      no marketing page, no Studio, and no static prerender ever fetches it.
 //      Nothing else imports this file.
-//   2. No client id, no button. NEXT_PUBLIC_GOOGLE_CLIENT_ID is the same
-//      build-time switch CC_GOOGLE_CLIENT_ID is on the server — unset, the
-//      endpoint 503s honestly and this renders nothing at all rather than a
-//      control that cannot work.
+//   2. No client id, no button, and no script either.
+//      NEXT_PUBLIC_GOOGLE_CLIENT_ID is the same build-time switch
+//      CC_GOOGLE_CLIENT_ID is on the server. Unset, the endpoint 503s
+//      honestly and this renders nothing rather than a control that cannot
+//      work. The effect below checks the same flag before loading anything,
+//      so such a build makes no request to Google at all.
 //   3. Google says who somebody is, and that is all. The ID token goes
 //      straight to our API, which verifies it against Google's keys and mints
 //      the same session the password path does; nothing here reads or trusts
@@ -153,7 +155,7 @@ export default function GoogleSignInButton() {
     async (response: GoogleCredentialResponse) => {
       const credential = response.credential ?? "";
       if (!credential) {
-        setError("Google didn't return a sign-in token — try again.");
+        setError("Google didn't return a sign-in token. Try again.");
         return;
       }
       setError(null);
@@ -168,7 +170,7 @@ export default function GoogleSignInButton() {
         setError(
           e instanceof Error
             ? e.message
-            : "That Google sign-in didn't work — try again."
+            : "That Google sign-in didn't work. Try again."
         );
       }
     },
@@ -183,6 +185,13 @@ export default function GoogleSignInButton() {
   }, [handleCredential]);
 
   useEffect(() => {
+    // Hooks cannot sit behind the `if (!googleSignInEnabled) return null`
+    // below, so the guard has to be repeated here. Without it this effect
+    // still ran in a build with no client id and fetched Google's SDK for a
+    // button that renders nothing, which made the privacy page's "no
+    // third-party scripts" claim false for every such build.
+    if (!googleSignInEnabled) return;
+
     deadRef.current = false;
     let cancelled = false;
 
@@ -283,7 +292,7 @@ export default function GoogleSignInButton() {
         ) : null}
         {phase === "unavailable" ? (
           <p className="text-center text-xs leading-relaxed text-zinc-500">
-            Google sign-in couldn&rsquo;t load — a blocker or a flaky
+            Google sign-in couldn&rsquo;t load. A blocker or a flaky
             connection will do that. Email and password above works either
             way.
           </p>
@@ -307,7 +316,7 @@ export default function GoogleSignInButton() {
       </div>
 
       <p className="text-center text-xs leading-relaxed text-zinc-500">
-        Google tells us who you are — nothing more. Posting to TikTok,
+        Google tells us who you are and nothing more. Posting to TikTok,
         Instagram or YouTube is a separate connection you add later.
       </p>
     </div>

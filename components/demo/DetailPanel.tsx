@@ -68,7 +68,7 @@ export default function DetailPanel({
     <aside
       role="dialog"
       aria-modal="true"
-      aria-label={`${clip.title} — clip details`}
+      aria-label={`${clip.title}: clip details`}
       className="fixed inset-0 z-50 flex animate-rise flex-col bg-ink-900 lg:static lg:z-auto lg:w-[420px] lg:shrink-0 lg:border-l lg:border-line lg:bg-ink-900/60"
     >
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-5">
@@ -89,14 +89,10 @@ export default function DetailPanel({
       <div className="cc-scroll flex-1 overflow-y-auto overscroll-contain px-5 py-5">
         {/* 9:16 preview */}
         <div className="relative mx-auto w-full max-w-[230px] overflow-hidden rounded-2xl border border-line-strong shadow-[0_12px_48px_rgba(0,0,0,0.45)]">
-          <div aria-hidden className={`aspect-[9/16] w-full ${clip.gradient}`} />
+          <div aria-hidden className={`aspect-[9/16] w-full ${clip.tint}`} />
           <span
             aria-hidden
             className="pointer-events-none absolute left-1/2 top-1/4 h-28 w-28 -translate-x-1/2 rounded-full bg-white/10 blur-2xl"
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-ink-950/85 to-transparent"
           />
           <span className="absolute left-2.5 top-2.5 rounded-md bg-ink-950/70 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 backdrop-blur-sm">
             4K · 9:16

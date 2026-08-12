@@ -55,7 +55,7 @@ export function bakeRenderResult(
       ...s.chat,
       {
         role: "catalyst",
-        text: `Baked in — the clip is now ${fmt1(rendered.outputDuration)} s.`,
+        text: `Baked in. The clip is now ${fmt1(rendered.outputDuration)} s.`,
       },
     ],
   };
@@ -264,9 +264,6 @@ export default function ResultsView({
     <>
       <div className="mx-auto flex max-w-4xl flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:justify-between sm:text-left">
         <div>
-          <p className="mb-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-signal-400">
-            Done — on your device
-          </p>
           <h1
             tabIndex={-1}
             className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl"
@@ -275,8 +272,8 @@ export default function ResultsView({
           </h1>
           <p className="mt-3 text-sm text-zinc-400 sm:text-base">
             <span className="font-mono">{clips.length}</span>{" "}
-            {clips.length === 1 ? "clip" : "clips"}, scored and captioned.
-            Preview, then download.
+            {clips.length === 1 ? "clip" : "clips"}, scored and captioned on
+            your device. Preview, then download.
           </p>
         </div>
         <Button variant="secondary" onClick={onReset}>
@@ -287,8 +284,8 @@ export default function ResultsView({
       {failedCount > 0 ? (
         <p className="mx-auto mt-8 max-w-4xl rounded-xl border border-ember-500/30 bg-ember-500/[0.06] px-4 py-3 text-center text-sm text-ember-300">
           <span className="font-mono">{failedCount}</span>{" "}
-          {failedCount === 1 ? "clip" : "clips"} didn&apos;t finish rendering
-          — here&apos;s what did.
+          {failedCount === 1 ? "clip" : "clips"} didn&apos;t finish rendering.
+          Here&apos;s what did.
         </p>
       ) : null}
 

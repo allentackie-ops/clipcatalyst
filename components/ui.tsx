@@ -15,21 +15,20 @@ export function Container({
   );
 }
 
-export function Eyebrow({ children }: { children: ReactNode }) {
-  return (
-    <p className="mb-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-brand-400">
-      {children}
-    </p>
-  );
-}
-
+/**
+ * `Eyebrow` used to live here: a mono uppercase kicker above a section
+ * heading. It was removed rather than restyled, because every one of its
+ * usages was the decorative "EARLY ACCESS" chip the refresh deletes, and a
+ * component whose only job is banned decoration is an invitation to put it
+ * back. `SectionHeading` lost its `eyebrow` prop with it, so a leftover
+ * kicker is a compile error rather than something that quietly renders.
+ * Headings stand on their own.
+ */
 export function SectionHeading({
-  eyebrow,
   title,
   lede,
   align = "center",
 }: {
-  eyebrow?: string;
   title: ReactNode;
   lede?: ReactNode;
   align?: "center" | "left";
@@ -38,7 +37,6 @@ export function SectionHeading({
     align === "center" ? "text-center mx-auto items-center" : "text-left";
   return (
     <div className={`flex max-w-3xl flex-col ${alignCls}`}>
-      {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
       <h2 className="font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl md:text-[2.75rem] md:leading-[1.1]">
         {title}
       </h2>
@@ -51,12 +49,14 @@ export function SectionHeading({
   );
 }
 
+/**
+ * The accent span inside a headline. The name is historical: it renders one
+ * solid brand violet now, not a gradient. Kept as a component (rather than
+ * inlined at each call site) so the accent stays one decision in one place,
+ * and so no caller had to change when the gradient went.
+ */
 export function GradientText({ children }: { children: ReactNode }) {
-  return (
-    <span className="bg-gradient-to-r from-brand-400 via-spark-400 to-ember-400 bg-clip-text text-transparent">
-      {children}
-    </span>
-  );
+  return <span className="text-brand-300">{children}</span>;
 }
 
 type ButtonProps = {
@@ -78,15 +78,17 @@ export function Button({
   className = "",
   type = "button",
 }: ButtonProps) {
+  // transition-colors, not transition-all: the only thing that moves on hover
+  // now is colour. The old transition-all existed to ease the glow shadow and
+  // the brightness filter, and both are gone.
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400";
+    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400";
   const sizes = {
     md: "px-5 py-2.5 text-sm",
     lg: "px-7 py-3.5 text-base",
   };
   const variants = {
-    primary:
-      "bg-gradient-to-r from-brand-600 to-spark-500 text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] hover:brightness-110",
+    primary: "bg-brand-600 text-white hover:bg-brand-500",
     secondary:
       "border border-line-strong bg-white/5 text-white hover:border-brand-400/60 hover:bg-white/10",
     ghost: "text-zinc-300 hover:text-white",

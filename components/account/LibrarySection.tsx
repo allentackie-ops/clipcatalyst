@@ -45,7 +45,7 @@ function retentionLine(
   }
   return (
     `On ${planLabel}, a saved clip's video is kept for ${retentionDays} days. ` +
-    "After that the file is deleted and the card stays — title, score and " +
+    "After that the file is deleted and the card stays: title, score and " +
     "hooks are permanent."
   );
 }
@@ -109,7 +109,7 @@ export default function LibrarySection({
       setPhase("ready");
     } catch (e) {
       if (deadRef.current || expired(e)) return;
-      setError(message(e, "Couldn't load your library — try again."));
+      setError(message(e, "Couldn't load your library. Try again."));
       setPhase("error");
     }
   }, [expired]);
@@ -139,7 +139,7 @@ export default function LibrarySection({
       );
     } catch (e) {
       if (deadRef.current || expired(e)) return;
-      setError(message(e, "Couldn't load more clips — try again."));
+      setError(message(e, "Couldn't load more clips. Try again."));
     } finally {
       if (!deadRef.current) setLoadingMore(false);
     }
@@ -167,7 +167,7 @@ export default function LibrarySection({
         if (deadRef.current || expired(e)) return;
         setDeleteErrors((current) => ({
           ...current,
-          [id]: message(e, "Couldn't delete that clip — try again."),
+          [id]: message(e, "Couldn't delete that clip. Try again."),
         }));
       } finally {
         if (!deadRef.current) setDeletingId(null);
@@ -191,7 +191,7 @@ export default function LibrarySection({
   const retention = retentionLine(user.entitlements.retention_days, planLabel);
   const lapsedNote =
     effectivePlan(user) === "free" && user.plan !== "free"
-      ? " Clips saved on your old plan keep the window they were saved with — a plan change never shortens one."
+      ? " Clips saved on your old plan keep the window they were saved with, because a plan change never shortens one."
       : "";
 
   return (
@@ -206,7 +206,7 @@ export default function LibrarySection({
           Library
         </h2>
         <p className="text-sm leading-relaxed text-zinc-400">
-          Every clip you&rsquo;ve kept — cloud renders land here on their own,
+          Every clip you&rsquo;ve kept. Cloud renders land here on their own,
           and browser clips arrive when you press “Save to library” in Studio.
         </p>
         {retention ? (
@@ -218,7 +218,7 @@ export default function LibrarySection({
         {unconnected.length > 0 ? (
           <p className="mt-1 text-xs leading-relaxed text-zinc-500">
             {unconnected.map((platform) => platform.label).join(" and ")} can
-            take a clip straight from here —{" "}
+            take a clip straight from here, so{" "}
             <a
               href="#connections-heading"
               className="rounded text-brand-300 underline-offset-4 transition-colors hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
@@ -257,7 +257,7 @@ export default function LibrarySection({
       ) : clips.length === 0 ? (
         <Card className="mt-6 flex flex-col items-start gap-4 p-6 sm:p-7">
           <p className="text-sm leading-relaxed text-zinc-400">
-            Nothing saved yet. Clip a video in Studio — cloud clips are kept
+            Nothing saved yet. Clip a video in Studio: cloud clips are kept
             here automatically, and a browser clip is one click away once
             it&rsquo;s rendered.
           </p>

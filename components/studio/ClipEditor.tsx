@@ -68,7 +68,7 @@ const RERENDER_HINT = "Hit Re-render to bake it in.";
 
 /** Every example is a real command — the honesty rule covers the greeting. */
 const GREETING =
-  'Tell me what to change — try "remove all the pauses", "add a zoom at 0:08", or "trim the first 2 seconds". Say "help" for everything I can do.';
+  'Tell me what to change. Try "remove all the pauses", "add a zoom at 0:08", or "trim the first 2 seconds". Say "help" for everything I can do.';
 
 export function newEditSession(): EditSession {
   return {
@@ -249,7 +249,7 @@ export default function ClipEditor({
       if (note) reply += ` ${note}`;
       if (target !== index) {
         reply += changed
-          ? ` That went to clip ${target + 1} — open it and hit Re-render to bake it in.`
+          ? ` That went to clip ${target + 1}. Open it and hit Re-render to bake it in.`
           : ` That was about clip ${target + 1}.`;
       } else if (changed) {
         reply += ` ${RERENDER_HINT}`;
@@ -285,7 +285,7 @@ export default function ClipEditor({
         {
           role: "catalyst",
           text: isEmptyEdits(prev)
-            ? "Undid the last edit — back to the original clip."
+            ? "Undid the last edit. You're back to the original clip."
             : "Undid the last edit.",
         },
       ]);
@@ -463,7 +463,7 @@ export default function ClipEditor({
             </p>
             {session.dirty ? (
               <p className="mt-2 text-center text-xs leading-relaxed text-ember-400/90">
-                The preview shows the last render — hit Re-render to apply your
+                The preview shows the last render. Hit Re-render to apply your
                 edits.
               </p>
             ) : null}
@@ -595,7 +595,7 @@ export default function ClipEditor({
                   type="button"
                   onClick={onRerender}
                   disabled={!canRerender}
-                  className="inline-flex min-w-0 flex-1 basis-40 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-5 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:brightness-100"
+                  className="inline-flex min-w-0 flex-1 basis-40 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-600"
                 >
                   {session.rendering !== null
                     ? `Re-rendering… ${Math.round(session.rendering * 100)}%`
@@ -627,7 +627,7 @@ export default function ClipEditor({
                   aria-valuenow={Math.round(session.rendering * 100)}
                 >
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-brand-500 to-spark-400 transition-[width] duration-300 ease-out"
+                    className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out"
                     style={{ width: `${Math.round(session.rendering * 100)}%` }}
                   />
                 </div>

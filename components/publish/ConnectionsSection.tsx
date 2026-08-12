@@ -30,9 +30,9 @@ import { useConnections } from "./ConnectionsProvider";
  *  the words, so a message can be improved without a deploy of the API. */
 const CONNECT_ERRORS: Record<string, string> = {
   denied:
-    "That connection was cancelled at the platform's consent screen — nothing was connected.",
+    "That connection was cancelled at the platform's consent screen, so nothing was connected.",
   refused:
-    "The platform refused that connection. Nothing was stored — please try connecting again.",
+    "The platform refused that connection. Nothing was stored, so please try connecting again.",
   unavailable:
     "We couldn't reach the platform just now, so nothing was connected. Try again in a moment.",
   no_account:
@@ -249,7 +249,7 @@ export default function ConnectionsSection({
         setBusyId(null);
         setRowError(
           platform,
-          message(e, "Couldn't start that connection — try again.")
+          message(e, "Couldn't start that connection. Try again.")
         );
       }
     },
@@ -275,7 +275,7 @@ export default function ConnectionsSection({
         // A 502 means the provider couldn't be reached and NOTHING was
         // removed — the server says so, and saying anything softer here would
         // leave somebody believing a channel had been disconnected.
-        setRowError(id, message(e, "Couldn't disconnect that channel — try again."));
+        setRowError(id, message(e, "Couldn't disconnect that channel. Try again."));
       } finally {
         if (!deadRef.current) setBusyId(null);
       }
@@ -300,8 +300,8 @@ export default function ConnectionsSection({
           Connections
         </h2>
         <p className="text-sm leading-relaxed text-zinc-400">
-          Connect a channel and a finished clip can go straight to it — from
-          your library, or from Studio the moment it renders. Sharing from your
+          Connect a channel and a finished clip can go straight to it, from
+          your library or from Studio the moment it renders. Sharing from your
           phone works without any of this, and always will.
         </p>
       </div>

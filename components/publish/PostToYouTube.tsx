@@ -93,7 +93,7 @@ function landedLine(privacy: string): string {
     return "It's on your channel as a private video. Publish it from YouTube whenever you're ready.";
   }
   if (privacy === "unlisted") {
-    return "It's on your channel as an unlisted video — anyone with the link can watch it.";
+    return "It's on your channel as an unlisted video, so anyone with the link can watch it.";
   }
   return "It's live on your channel.";
 }
@@ -321,7 +321,7 @@ export default function PostToYouTube({
         setError(
           err instanceof Error
             ? err.message
-            : "Couldn't start that upload — try again."
+            : "Couldn't start that upload. Try again."
         );
         // 409 is the "something changed underneath you" status — in this
         // route, a channel disconnected somewhere else, or a clip whose file
@@ -431,7 +431,7 @@ export default function PostToYouTube({
                       href={videoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-5 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                      className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
                     >
                       Watch on YouTube
                       <svg
@@ -450,7 +450,7 @@ export default function PostToYouTube({
                     </a>
                   ) : null}
                   <p className="text-xs leading-relaxed text-zinc-500">
-                    The clip stays in your library — posting copies it, it never
+                    The clip stays in your library. Posting copies it, it never
                     moves it.
                   </p>
                 </div>
@@ -466,12 +466,12 @@ export default function PostToYouTube({
                       className="h-1.5 w-full overflow-hidden rounded-full bg-white/10"
                     >
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-brand-500 to-spark-400 transition-[width] duration-300 ease-out"
+                        className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
                     <p className="font-mono text-[11px] text-zinc-500">
-                      {job.detail || "Uploading"} —{" "}
+                      {job.detail || "Uploading"}{" "}
                       <span className="tabular-nums">{pct}%</span>
                     </p>
                   </div>
@@ -481,7 +481,7 @@ export default function PostToYouTube({
                     </p>
                   ) : null}
                   <p className="text-xs leading-relaxed text-zinc-500">
-                    You can close this — the upload keeps going, and this button
+                    You can close this. The upload keeps going, and this button
                     picks it back up.
                   </p>
                 </div>
@@ -538,7 +538,7 @@ export default function PostToYouTube({
                     {topHook ? (
                       <p className="text-xs leading-relaxed text-zinc-500">
                         Left blank, the description becomes this clip&rsquo;s top
-                        hook — “{topHook}”.
+                        hook: “{topHook}”.
                       </p>
                     ) : null}
                   </div>
@@ -633,7 +633,7 @@ export default function PostToYouTube({
                     <button
                       type="submit"
                       aria-busy={posting}
-                      className="inline-flex min-w-0 flex-1 basis-40 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-5 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                      className="inline-flex min-w-0 flex-1 basis-40 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
                     >
                       <PlayGlyph />
                       {posting
@@ -707,7 +707,7 @@ export default function PostToYouTube({
           {uploading
             ? `Posting… ${pct}%`
             : job?.status === "failed"
-              ? "Posting failed — try again"
+              ? "Try posting again"
               : "Post to YouTube"}
         </button>
       )}

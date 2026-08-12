@@ -3,7 +3,7 @@ import { Badge, Button, Container, GradientText, ScoreRing } from "@/components/
 const STATS = [
   { value: "<90s", label: "median time" },
   { value: "4K", label: "max export" },
-  { value: "0–100", label: "virality score" },
+  { value: "0-100", label: "virality score" },
   { value: "10GB", label: "max upload" },
 ];
 
@@ -30,25 +30,11 @@ export default function Hero() {
       id="hero"
       className="relative overflow-hidden pt-32 pb-20 md:pb-28 lg:flex lg:min-h-[90vh] lg:items-center lg:pt-36 lg:pb-24"
     >
-      {/* single decorative glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-brand-600/20 blur-[130px] lg:right-[2%] lg:top-16"
-      />
-
       <Container>
         <div className="grid items-center gap-16 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10">
           {/* ---- Copy column ---- */}
           <div className="relative">
-            <Badge tone="brand">
-              <span
-                aria-hidden
-                className="h-1.5 w-1.5 rounded-full bg-signal-400 animate-pulse-soft"
-              />
-              Free &mdash; no signup, no upload
-            </Badge>
-
-            <h1 className="mt-6 font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl lg:leading-[1.05]">
+            <h1 className="font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl lg:leading-[1.05]">
               <span className="block">Studio-quality clips</span>
               <span className="block">
                 in <GradientText>90 seconds</GradientText>.
@@ -57,8 +43,8 @@ export default function Hero() {
 
             <p className="mt-6 max-w-xl text-base leading-relaxed text-zinc-400 sm:text-lg">
               Paste a link. The AI finds your viral moments, reframes them to
-              9:16, captions every word, and scores each clip 0&ndash;100. Stop
-              editing &mdash; start posting.
+              9:16, captions every word, and scores each clip 0 to 100. Stop
+              editing. Start posting.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
@@ -71,7 +57,7 @@ export default function Hero() {
             </div>
 
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-zinc-500">
-              Clipping runs in your browser &mdash; nothing to install, nothing
+              Clipping runs in your browser. Nothing to install, nothing
               uploaded, and your video never leaves your device. Desktop
               Chrome, Edge, or Firefox.
             </p>
@@ -96,7 +82,7 @@ export default function Hero() {
             {/* back-left card */}
             <div
               aria-hidden
-              className="absolute left-0 top-1/2 z-0 aspect-[9/16] w-32 -translate-y-[58%] -rotate-6 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-ink-700 via-ink-850 to-spark-500/20 opacity-90 shadow-xl shadow-black/40 sm:w-36 lg:w-40"
+              className="absolute left-0 top-1/2 z-0 aspect-[9/16] w-32 -translate-y-[58%] -rotate-6 overflow-hidden rounded-2xl border border-line bg-ink-800 opacity-90 shadow-xl shadow-black/40 sm:w-36 lg:w-40"
             >
               <span className="absolute left-2.5 top-2.5 rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
                 0:21
@@ -110,7 +96,7 @@ export default function Hero() {
             {/* back-right card */}
             <div
               aria-hidden
-              className="absolute right-0 top-1/2 z-0 aspect-[9/16] w-32 -translate-y-[42%] rotate-6 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-ink-700 via-ink-850 to-ember-500/20 opacity-90 shadow-xl shadow-black/40 sm:w-36 lg:w-40"
+              className="absolute right-0 top-1/2 z-0 aspect-[9/16] w-32 -translate-y-[42%] rotate-6 overflow-hidden rounded-2xl border border-line bg-ink-800 opacity-90 shadow-xl shadow-black/40 sm:w-36 lg:w-40"
             >
               <div className="absolute right-2.5 top-2.5 flex flex-col items-end gap-1.5">
                 <span className="rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
@@ -127,13 +113,7 @@ export default function Hero() {
             </div>
 
             {/* front card */}
-            <div className="relative z-10 aspect-[9/16] w-48 overflow-hidden rounded-2xl border border-line-strong bg-gradient-to-br from-ink-700 via-ink-800 to-brand-700/30 shadow-2xl shadow-black/50 sm:w-56 lg:w-60">
-              {/* soft top sheen inside the "video" */}
-              <div
-                aria-hidden
-                className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.07),transparent_55%)]"
-              />
-
+            <div className="relative z-10 aspect-[9/16] w-48 overflow-hidden rounded-2xl border border-line-strong bg-ink-700 shadow-2xl shadow-black/50 sm:w-56 lg:w-60">
               {/* top row: duration + score */}
               <div className="absolute inset-x-3 top-3 flex items-start justify-between">
                 <span className="rounded-md bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-200">
@@ -197,7 +177,7 @@ export default function Hero() {
                   aria-hidden
                   className="h-1 w-full overflow-hidden rounded-full bg-white/10"
                 >
-                  <div className="h-full w-[62%] rounded-full bg-gradient-to-r from-brand-400 to-spark-400" />
+                  <div className="h-full w-[62%] rounded-full bg-brand-400" />
                 </div>
               </div>
             </div>

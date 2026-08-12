@@ -14,7 +14,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
-import { Container, Eyebrow } from "@/components/ui";
+import { Container } from "@/components/ui";
 
 /**
  * Where to write about anything on either page.
@@ -152,12 +152,10 @@ function num(index: number): string {
  * visible rather than tucked under the navbar.
  */
 export default function DocPage({
-  eyebrow,
   title,
   lede,
   sections,
 }: {
-  eyebrow: string;
   title: string;
   lede: string;
   sections: DocSection[];
@@ -167,16 +165,11 @@ export default function DocPage({
       <Navbar />
       <main id="main" className="pt-16">
         <article className="relative py-16 md:py-24">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
-          />
           <Container className="relative">
             {/* Same measure as the body column below, so the title, the lede
                 and the first paragraph of the document share a left AND a
                 right edge on a wide screen. */}
             <header className="max-w-[36rem]">
-              <Eyebrow>{eyebrow}</Eyebrow>
               <h1 className="font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl md:text-[2.75rem] md:leading-[1.1]">
                 {title}
               </h1>

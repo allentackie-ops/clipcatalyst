@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 import {
-  Badge,
   Card,
   Container,
   GradientText,
@@ -28,14 +27,12 @@ const HOOKS: {
 const CAPABILITIES: {
   name: string;
   blurb: string;
-  tile: string;
   icon: ReactNode;
 }[] = [
   {
     name: "Platform-specific optimization",
     blurb:
-      "Tunes each clip for TikTok, Reels, or Shorts — three feeds, three trend models, zero one-size-fits-all.",
-    tile: "border-brand-500/25 bg-gradient-to-br from-brand-500/20 to-brand-500/5 text-brand-300",
+      "Tunes each clip for TikTok, Reels, or Shorts. Three feeds, three trend models, no one-size-fits-all.",
     icon: (
       <svg
         width="20"
@@ -57,8 +54,7 @@ const CAPABILITIES: {
   {
     name: "Hook generation",
     blurb:
-      "Writes 5 scroll-stopping hooks per clip, then recommends the strongest — with the retention math to back it.",
-    tile: "border-spark-500/25 bg-gradient-to-br from-spark-500/20 to-spark-500/5 text-spark-400",
+      "Writes 5 scroll-stopping hooks per clip, then recommends the strongest, with the retention math to back it.",
     icon: (
       <svg
         width="20"
@@ -80,7 +76,6 @@ const CAPABILITIES: {
     name: "Timing optimization",
     blurb:
       "Finds the exact millisecond to cut in and out. Retention lives or dies in the first 400ms.",
-    tile: "border-ember-500/25 bg-gradient-to-br from-ember-500/20 to-ember-500/5 text-ember-400",
     icon: (
       <svg
         width="20"
@@ -101,8 +96,7 @@ const CAPABILITIES: {
   {
     name: "Audio analysis",
     blurb:
-      "Detects laughter spikes, dramatic pauses, and emotional peaks — the moments feeds reward.",
-    tile: "border-signal-500/25 bg-gradient-to-br from-signal-500/20 to-signal-500/5 text-signal-400",
+      "Detects the laughter spikes, dramatic pauses, and emotional peaks that feeds reward.",
     icon: (
       <svg
         width="20"
@@ -128,20 +122,15 @@ const CAPABILITIES: {
 export default function ViralityEngine() {
   return (
     <section id="virality-engine" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/20 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="The secret sauce"
           title={
             <>
-              Not <span className="text-zinc-500">a score</span> —{" "}
-              <GradientText>an engine</GradientText>
+              Not <span className="text-zinc-500">a score</span>.{" "}
+              <GradientText>An engine</GradientText>.
             </>
           }
-          lede="Every clip gets a 0–100 virality score. Underneath it, four systems decide what to cut, what to say first, and how to say it — then tell you exactly how to push the number higher."
+          lede="Every clip gets a virality score out of 100. Underneath it, four systems decide what to cut, what to say first, and how to say it. Then they tell you exactly how to push the number higher."
         />
 
         <div className="mt-16 grid items-stretch gap-10 lg:grid-cols-[1.08fr_1fr] lg:gap-12">
@@ -197,11 +186,8 @@ export default function ViralityEngine() {
                       &ldquo;{hook.text}&rdquo;
                     </span>
                     {hook.recommended ? (
-                      <span className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
-                        <Badge tone="signal">Recommended</Badge>
-                        <span className="rounded-md bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
-                          +12 retention
-                        </span>
+                      <span className="shrink-0 rounded-md bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-signal-400">
+                        +12 retention
                       </span>
                     ) : null}
                   </li>
@@ -222,7 +208,7 @@ export default function ViralityEngine() {
               <div className="relative mt-3 h-2.5 rounded-full bg-ink-700">
                 <div
                   aria-hidden
-                  className="absolute inset-y-0 left-[17%] right-[32%] rounded-full bg-gradient-to-r from-brand-500 via-brand-400 to-spark-500 shadow-[0_0_12px_rgba(139,92,246,0.5)]"
+                  className="absolute inset-y-0 left-[17%] right-[32%] rounded-full bg-brand-500"
                 />
                 <div
                   aria-hidden
@@ -273,9 +259,7 @@ export default function ViralityEngine() {
           <div className="grid h-full gap-4 sm:grid-cols-2">
             {CAPABILITIES.map((cap) => (
               <Card key={cap.name} className="h-full p-5 sm:p-6">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${cap.tile}`}
-                >
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-brand-500/25 bg-brand-500/10 text-brand-300">
                   {cap.icon}
                 </div>
                 <h3 className="mt-4 font-display text-base font-semibold tracking-tight text-white">

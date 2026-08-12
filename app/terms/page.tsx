@@ -17,7 +17,7 @@ import DocPage, {
 } from "@/components/legal/Doc";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — ClipCatalyst",
+  title: "Terms of Service | ClipCatalyst",
   description:
     "The agreement between you and ClipCatalyst: what the service does, what you may upload, how plans and cancellation work, and what we do and do not promise.",
 };
@@ -37,8 +37,8 @@ const SECTIONS: DocSection[] = [
         </P>
         <P>
           They are written in plain English on purpose. Where a sentence here
-          describes what the software does, it describes what it actually does —
-          if you find one that does not, tell us at <MailLink /> and it will be
+          describes what the software does, it describes what it actually does.
+          If you find one that does not, tell us at <MailLink /> and it will be
           corrected.
         </P>
       </>
@@ -100,7 +100,7 @@ const SECTIONS: DocSection[] = [
             <>
               Keep your credentials to yourself. Anything done with a live
               session is treated as done by you. If you think a session is not
-              yours, sign out — that revokes it — and write to us.
+              yours, sign out (that revokes it) and write to us.
             </>,
             <>
               You must be old enough to enter into a contract where you live, and
@@ -131,7 +131,7 @@ const SECTIONS: DocSection[] = [
           function: permission to store and process your file so the job can
           produce the clips you asked for, and to store the clips you choose to
           save so we can hand them back to you. It lasts as long as we hold the
-          file — which, for an uploaded source, is until the job finishes.
+          file, which for an uploaded source is until the job finishes.
         </P>
         <P>
           We do not use your video, audio, transcripts or clips to train or
@@ -157,7 +157,7 @@ const SECTIONS: DocSection[] = [
         <List
           items={[
             <>
-              <Em>No content you do not have the rights to</Em> — somebody
+              <Em>No content you do not have the rights to.</Em> Somebody
               else&apos;s film, show, stream, music or footage, uploaded so the
               engine can cut it up for you, is exactly the case this rule exists
               for.
@@ -178,7 +178,7 @@ const SECTIONS: DocSection[] = [
         <P>
           We do not review clips before you post them, and we do not watch what
           you upload. But we may suspend an account, or remove content, when we
-          become aware of a breach of this section — and where we can, we will
+          become aware of a breach of this section, and where we can, we will
           say why.
         </P>
       </>
@@ -191,13 +191,13 @@ const SECTIONS: DocSection[] = [
       <>
         <Note>
           Free-tier exports are watermarked. Every clip a free account renders
-          carries the ClipCatalyst mark — in the browser and in the cloud alike —
+          carries the ClipCatalyst mark, in the browser and in the cloud alike,
           and paid plans remove it.
         </Note>
         <P>
-          The plans, as the software enforces them: Free — 3 clips a month, up to
-          720p, watermarked. Starter — 30 clips, up to 1080p, no watermark, brand
-          kit. Pro — 100 clips, up to 4K. Enterprise — unlimited clips. Current
+          The plans, as the software enforces them. Free: 3 clips a month, up to
+          720p, watermarked. Starter: 30 clips, up to 1080p, no watermark, brand
+          kit. Pro: 100 clips, up to 4K. Enterprise: unlimited clips. Current
           prices are on the{" "}
           <DocLink href="/#pricing">pricing page</DocLink>.
         </P>
@@ -209,7 +209,7 @@ const SECTIONS: DocSection[] = [
             </>,
             <>
               <Em>A clip that fails to render costs nothing.</Em> A job reserves
-              its clips when it starts and gives back whatever did not render —
+              its clips when it starts and gives back whatever did not render,
               including everything, if the job failed outright.
             </>,
             <>
@@ -218,7 +218,7 @@ const SECTIONS: DocSection[] = [
               against your account&apos;s stored-clip ceiling instead.
             </>,
             <>
-              What a render is allowed to do — resolution, watermark, brand kit —
+              What a render is allowed to do (resolution, watermark, brand kit)
               is read from your plan <Em>at the moment the render starts</Em>. An
               upgrade applies to your next render; a plan that has lapsed stops
               applying to it.
@@ -255,8 +255,8 @@ const SECTIONS: DocSection[] = [
         </P>
         <P>
           A cloud job that runs past the server&apos;s render timeout is stopped
-          and reported as failed, and it returns the allowance it reserved — you
-          are not charged clips for a run that did not deliver them.
+          and reported as failed, and it returns the allowance it reserved, so
+          you are not charged clips for a run that did not deliver them.
         </P>
         <P>
           Runs in the browser depend entirely on your own machine. Without GPU
@@ -284,20 +284,21 @@ const SECTIONS: DocSection[] = [
           charge; your plan&apos;s entitlements last until the end of the period
           you have already paid for, after which the account returns to Free.
           Clips already in your library keep the retention deadline they were
-          given — a downgrade does not shorten it.
+          given, because a downgrade does not shorten it.
         </P>
         <Sub>Failed payments</Sub>
         <P>
           If a renewal charge fails, Stripe retries it. Your plan keeps working
-          during that window — up to fourteen days past the end of the paid
-          period — and then the account drops to Free until payment succeeds.
+          during that window, up to fourteen days past the end of the paid
+          period, and then the account drops to Free until payment succeeds.
         </P>
         <Sub>Refunds</Sub>
         <P>
           We do not automatically refund part-used months; cancelling leaves you
-          with the time you paid for. If the service failed you — a run of broken
-          jobs, a charge you did not expect, a plan that did not do what this
-          page says it does — write to <MailLink /> and we will sort it out.
+          with the time you paid for. If the service failed you, whether that
+          is a run of broken jobs, a charge you did not expect, or a plan that
+          did not do what this page says it does, write to <MailLink /> and we
+          will sort it out.
           Statutory cancellation and refund rights where you live are unaffected
           by anything on this page.
         </P>
@@ -317,8 +318,8 @@ const SECTIONS: DocSection[] = [
               a failure at an upstream provider.
             </>,
             <>
-              Beta features — Studio is one — can change or be withdrawn. We will
-              not remove a paid entitlement without notice.
+              Beta features, and Studio is one, can change or be withdrawn. We
+              will not remove a paid entitlement without notice.
             </>,
             <>
               Plans and prices can change. A price change takes effect from your
@@ -381,15 +382,15 @@ const SECTIONS: DocSection[] = [
           The service is provided <Em>as is</Em>. Clip selection is automated and
           imperfect: scores are estimates, transcripts contain errors, speaker
           tracking can miss, and a moment the engine loves may be one you would
-          never post. Watch anything before you publish it — the judgement is
+          never post. Watch anything before you publish it. The judgement is
           yours, and so is the responsibility for what you put out.
         </P>
         <P>
           To the maximum extent the law allows, we are not liable for lost
           profits, lost audience, lost or corrupted data, or any indirect or
           consequential loss; and our total liability for any claim is limited to
-          the amount you paid us in the twelve months before it arose — which,
-          for a free account, is nothing.
+          the amount you paid us in the twelve months before it arose, which
+          for a free account is nothing.
         </P>
         <P>
           Nothing here limits liability that cannot lawfully be limited,
@@ -425,7 +426,6 @@ const SECTIONS: DocSection[] = [
 export default function TermsPage() {
   return (
     <DocPage
-      eyebrow="Legal"
       title="Terms of Service"
       lede="The agreement between you and ClipCatalyst: what the service does, what you may upload, how plans, cancellation and the watermark work, and what we do and do not promise."
       sections={SECTIONS}

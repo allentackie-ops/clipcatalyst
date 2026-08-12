@@ -1,4 +1,4 @@
-import { Badge, Container, GradientText, SectionHeading } from "@/components/ui";
+import { Container, GradientText, SectionHeading } from "@/components/ui";
 
 type Layer = {
   id: string;
@@ -6,9 +6,9 @@ type Layer = {
   fn: string;
   tech: string;
   chip: string;
-  /** Gradient segment connecting this chip to the next one. Omit on L7. */
-  connector?: string;
 };
+
+const BRAND_CHIP = "border-brand-500/30 bg-brand-500/10 text-brand-300";
 
 const LAYERS: Layer[] = [
   {
@@ -16,74 +16,63 @@ const LAYERS: Layer[] = [
     name: "Topic detection",
     fn: "Transcribes every word, maps every speaker, and flags the moments worth cutting.",
     tech: "WhisperX · speaker diarization",
-    chip: "border-brand-500/30 bg-gradient-to-br from-brand-500/25 to-brand-500/5 text-brand-300",
-    connector: "from-brand-500/50 to-brand-500/45",
+    chip: BRAND_CHIP,
   },
   {
     id: "L2",
     name: "Creative scoring",
-    fn: "A multimodal model rates each candidate 0–100 on hook, arc, and payoff.",
+    fn: "A multimodal model rates each candidate out of 100 on hook, arc, and payoff.",
     tech: "Multimodal LLM · retention priors",
-    chip: "border-brand-500/30 bg-gradient-to-br from-brand-500/25 to-brand-500/5 text-brand-300",
-    connector: "from-brand-500/45 to-spark-500/45",
+    chip: BRAND_CHIP,
   },
   {
     id: "L3",
     name: "Visual processing",
     fn: "Reframes to 9:16 and keeps every face locked dead-center in frame.",
     tech: "OpenCV · MediaPipe face tracking",
-    chip: "border-spark-500/30 bg-gradient-to-br from-spark-500/25 to-spark-500/5 text-spark-400",
-    connector: "from-spark-500/45 to-spark-500/40",
+    chip: BRAND_CHIP,
   },
   {
     id: "L4",
     name: "Audio",
     fn: "Strips noise, levels dialogue, and lays music under the moment.",
     tech: "FFmpeg · AI noise reduction",
-    chip: "border-spark-500/30 bg-gradient-to-br from-spark-500/25 to-spark-500/5 text-spark-400",
-    connector: "from-spark-500/40 to-ember-500/40",
+    chip: BRAND_CHIP,
   },
   {
     id: "L5",
     name: "Post-production",
-    fn: "Applies animated captions, transitions, and matched B-roll — no timeline required.",
+    fn: "Applies animated captions, transitions, and matched B-roll. No timeline required.",
     tech: "Caption templates · B-roll matcher",
-    chip: "border-ember-500/30 bg-gradient-to-br from-ember-500/25 to-ember-500/5 text-ember-400",
-    connector: "from-ember-500/40 to-ember-500/40",
+    chip: BRAND_CHIP,
   },
   {
     id: "L6",
     name: "Distribution",
-    fn: "Publishes everywhere in one click — sized, captioned, and scheduled per platform.",
+    fn: "Publishes everywhere in one click, sized, captioned, and scheduled per platform.",
     tech: "TikTok · Shorts · Reels APIs",
-    chip: "border-ember-500/30 bg-gradient-to-br from-ember-500/25 to-ember-500/5 text-ember-400",
-    connector: "from-ember-500/40 to-signal-500/50",
+    chip: BRAND_CHIP,
   },
   {
     id: "L7",
     name: "Optimization",
     fn: "A/B tests every clip in the wild and feeds the results back into scoring.",
     tech: "A/B testing · reinforcement learning",
-    chip: "border-signal-500/40 bg-gradient-to-br from-signal-500/30 to-signal-500/5 text-signal-400 shadow-[0_0_24px_rgba(52,211,153,0.25)]",
+    chip: "border-signal-500/40 bg-signal-500/10 text-signal-400",
   },
 ];
 
 export default function Pipeline() {
   return (
     <section id="pipeline" className="relative py-24 md:py-32">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
-      />
-      <Container className="relative">
+      <Container>
         <SectionHeading
-          eyebrow="Under the hood"
           title={
             <>
               Seven layers, <GradientText>one pipeline</GradientText>
             </>
           }
-          lede="From raw footage to published clip, every frame passes through seven specialized layers. The last one feeds results back into scoring — every clip you ship makes the engine smarter."
+          lede="From raw footage to published clip, every frame passes through seven specialized layers. The last one feeds results back into scoring, so every clip you ship makes the engine smarter."
         />
 
         <div className="mx-auto mt-16 max-w-3xl">
@@ -91,13 +80,10 @@ export default function Pipeline() {
           <div className="relative flex items-center gap-4 pb-8 sm:gap-6">
             <div
               aria-hidden
-              className="absolute bottom-0 left-6 top-4 w-px bg-gradient-to-b from-brand-400/60 to-brand-500/50"
+              className="absolute bottom-0 left-6 top-4 w-px bg-brand-500/40"
             />
             <div className="flex w-12 shrink-0 justify-center">
-              <span
-                aria-hidden
-                className="h-2 w-2 rounded-full bg-brand-400 shadow-[0_0_10px_rgba(139,92,246,0.8)]"
-              />
+              <span aria-hidden className="h-2 w-2 rounded-full bg-brand-400" />
             </div>
             <p className="min-w-0 truncate font-mono text-xs text-zinc-500">
               <span className="uppercase tracking-[0.18em] text-zinc-600">
@@ -118,12 +104,12 @@ export default function Pipeline() {
                     isLoop ? "" : "pb-9"
                   }`}
                 >
-                  {layer.connector ? (
+                  {isLoop ? null : (
                     <div
                       aria-hidden
-                      className={`absolute bottom-0 left-6 top-12 w-px bg-gradient-to-b ${layer.connector}`}
+                      className="absolute bottom-0 left-6 top-12 w-px bg-brand-500/40"
                     />
-                  ) : null}
+                  )}
 
                   {/* Layer chip */}
                   <span
@@ -135,12 +121,9 @@ export default function Pipeline() {
                   {/* Layer content */}
                   {isLoop ? (
                     <div className="min-w-0 flex-1 rounded-2xl border border-signal-500/25 bg-signal-500/[0.05] p-5">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <h3 className="font-display text-lg font-semibold tracking-tight text-white">
-                          {layer.name}
-                        </h3>
-                        <Badge tone="signal">Closes the loop</Badge>
-                      </div>
+                      <h3 className="font-display text-lg font-semibold tracking-tight text-white">
+                        {layer.name}
+                      </h3>
                       <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
                         {layer.fn}
                       </p>

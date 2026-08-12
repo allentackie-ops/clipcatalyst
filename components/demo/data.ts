@@ -7,15 +7,15 @@ export type Clip = {
   duration: string;
   /** Timecode in the source footage the clip was cut from */
   sourceAt: string;
-  /** Virality score 0–100 */
+  /** Virality score, 0 to 100 */
   score: number;
   platforms: Platform[];
   /** Mock caption, split into words so one can be highlighted */
   captionWords: string[];
   /** Index of the word highlighted on the static card caption */
   captionHighlight: number;
-  /** Tailwind gradient classes for the 9:16 thumbnail */
-  gradient: string;
+  /** Tailwind background class for the 9:16 thumbnail */
+  tint: string;
   /** Five AI-generated hooks */
   hooks: string[];
   /** Index of the recommended hook */
@@ -38,7 +38,7 @@ export const CLIPS: Clip[] = [
     platforms: ["TikTok", "Shorts"],
     captionWords: ["we", "deleted", "it", "on", "a", "Tuesday"],
     captionHighlight: 1,
-    gradient: "bg-gradient-to-br from-brand-700/70 via-ink-800 to-ink-950",
+    tint: "bg-brand-700/35",
     hooks: [
       "We deleted the feature 40% of users loved. Here’s why.",
       "Killing our best feature was the smartest call we ever made",
@@ -57,7 +57,7 @@ export const CLIPS: Clip[] = [
     platforms: ["TikTok", "Reels"],
     captionWords: ["our", "CAC", "was", "literally", "zero"],
     captionHighlight: 4,
-    gradient: "bg-gradient-to-tr from-ink-900 via-ink-800 to-spark-500/40",
+    tint: "bg-ink-700",
     hooks: [
       "We hit 100K users on a $0 marketing budget",
       "The playbook growth agencies hope you never see",
@@ -76,7 +76,7 @@ export const CLIPS: Clip[] = [
     platforms: ["Shorts", "Reels"],
     captionWords: ["the", "résumé", "was", "perfect"],
     captionHighlight: 3,
-    gradient: "bg-gradient-to-b from-ember-500/30 via-ink-800 to-ink-950",
+    tint: "bg-ink-800",
     hooks: [
       "The most expensive mistake wasn’t in the budget",
       "Hiring fast nearly broke the company",
@@ -95,10 +95,10 @@ export const CLIPS: Clip[] = [
     platforms: ["TikTok", "Shorts"],
     captionWords: ["default", "alive", "changes", "everything"],
     captionHighlight: 1,
-    gradient: "bg-gradient-to-br from-ink-700 via-brand-700/35 to-ink-950",
+    tint: "bg-brand-700/25",
     hooks: [
       "We stopped fundraising and started charging",
-      "Default alive by month nine — the exact path",
+      "Default alive by month nine: the exact path",
       "Ramen profitable is a superpower, not a phase",
       "Nine months to never needing a VC again",
       "The spreadsheet that got us to profitable",
@@ -114,7 +114,7 @@ export const CLIPS: Clip[] = [
     platforms: ["Reels", "Shorts"],
     captionWords: ["rejection", "number", "31", "hurt", "the", "most"],
     captionHighlight: 2,
-    gradient: "bg-gradient-to-tl from-spark-500/25 via-ink-800 to-ink-900",
+    tint: "bg-ink-700",
     hooks: [
       "47 investors said no. Number 48 changed everything.",
       "Reading my rejection emails out loud",
@@ -133,7 +133,7 @@ export const CLIPS: Clip[] = [
     platforms: ["TikTok", "Reels"],
     captionWords: ["the", "office", "was", "a", "$2M", "habit"],
     captionHighlight: 4,
-    gradient: "bg-gradient-to-br from-ink-700 via-ink-850 to-ember-500/25",
+    tint: "bg-ink-800",
     hooks: [
       "We went remote and revenue went up",
       "The real cost of a desk nobody sits at",

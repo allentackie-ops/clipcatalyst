@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, Container, Eyebrow, Logo } from "@/components/ui";
+import { Button, Card, Container, Logo } from "@/components/ui";
 import { useAccount } from "@/components/account/AccountProvider";
 import { useStudioPipeline } from "./useStudioPipeline";
 import BrandKitPanel from "./BrandKitPanel";
@@ -91,7 +91,7 @@ const MAX_SOURCE_BYTES = 1_400_000_000;
 // common "model download died" shapes into one human sentence.
 function friendlyErrorMessage(raw: string): string {
   return /fetch|network|Failed to load|ERR_/i.test(raw)
-    ? "Couldn't download the AI model — check your connection and try again."
+    ? "Couldn't download the AI model. Check your connection and try again."
     : raw;
 }
 
@@ -108,9 +108,8 @@ function TopBar() {
             <Logo />
           </Link>
           <span className="hidden h-4 w-px bg-line-strong sm:block" aria-hidden />
-          <span className="hidden items-center gap-2 sm:flex">
-            <span className="text-sm font-medium text-zinc-300">Studio</span>
-            <Badge tone="neutral">Beta</Badge>
+          <span className="hidden text-sm font-medium text-zinc-300 sm:block">
+            Studio
           </span>
         </div>
         <Link
@@ -160,9 +159,9 @@ function UnsupportedView() {
           Studio needs a modern desktop browser
         </h1>
         <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
-          The whole pipeline — AI transcription, scoring, and video rendering —
-          runs on your device, and this browser is missing the recording APIs
-          it needs. Chrome, Edge, or Firefox on desktop will do it. The guided
+          The whole pipeline runs on your device: AI transcription, scoring,
+          and video rendering. This browser is missing the recording APIs it
+          needs. Chrome, Edge, or Firefox on desktop will do it, and the guided
           demo works everywhere.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -219,25 +218,25 @@ function MobileUnsupportedView({ verdict }: { verdict: CapabilityVerdict }) {
         <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
           {verdict.isIos ? (
             <>
-              Studio does the whole job inside this tab — Whisper
-              transcription, moment scoring, and video rendering. On iPhone and
-              iPad every browser runs on Apple&apos;s WebKit engine, which
-              won&apos;t hand a video file&apos;s audio track to the page, and
-              the render step needs more memory than iOS gives a tab.
+              Studio does the whole job inside this tab: Whisper transcription,
+              moment scoring, and video rendering. On iPhone and iPad every
+              browser runs on Apple&apos;s WebKit engine, which won&apos;t hand
+              a video file&apos;s audio track to the page, and the render step
+              needs more memory than iOS gives a tab.
             </>
           ) : (
             <>
-              Studio does the whole job inside this tab — Whisper
-              transcription, moment scoring, and video rendering. That is more
-              memory and CPU than a phone browser will give one tab, so a run
-              started here would stall or die partway through.
+              Studio does the whole job inside this tab: Whisper transcription,
+              moment scoring, and video rendering. That is more memory and CPU
+              than a phone browser will give one tab, so a run started here
+              would stall or die partway through.
             </>
           )}
         </p>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-400">
           Nothing is wrong with your video. Open this page in Chrome, Edge, or
-          Firefox on a computer and it runs end to end. Cloud clipping — upload
-          once, get clips back on any device — is coming.
+          Firefox on a computer and it runs end to end. Cloud clipping (upload
+          once, get clips back on any device) is coming.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Button href="/demo">Watch the product tour</Button>
@@ -313,8 +312,8 @@ function ErrorView({
             On a phone, the on-device engine can&apos;t finish this.{" "}
             <Link href="/demo" className="text-brand-300 underline-offset-4 hover:underline">
               Watch the product tour
-            </Link>{" "}
-            — or open Studio on a desktop, where it runs end to end.
+            </Link>
+            , or open Studio on a desktop, where it runs end to end.
           </p>
         ) : null}
       </div>
@@ -367,17 +366,18 @@ function EngineToggle({
       <p className="mt-2.5 text-xs leading-relaxed text-zinc-500">
         {engine === "cloud" ? (
           <>
-            Cloud uploads your video to your ClipCatalyst server — minutes-long
-            jobs finish in <span className="font-mono">~2 min</span>.
+            Cloud uploads your video to your ClipCatalyst server, where
+            minutes-long jobs finish in{" "}
+            <span className="font-mono">~2 min</span>.
           </>
         ) : mobile ? (
           <>
-            On-device runs the whole pipeline in this tab — it needs Chrome,
+            On-device runs the whole pipeline in this tab, so it needs Chrome,
             Edge, or Firefox on a desktop. On a phone it usually stops while
             reading the video&apos;s audio.
           </>
         ) : (
-          <>Everything runs in this browser — no upload, no queue.</>
+          <>Everything runs in this browser. No upload, no queue.</>
         )}
       </p>
     </div>
@@ -386,7 +386,7 @@ function EngineToggle({
 
 function CloudProgressBar({ progress }: { progress: number }) {
   if (progress < 0) {
-    // Indeterminate: sweeping shimmer built on the marquee keyframes.
+    // Indeterminate: a solid accent pill sweeping on the marquee keyframes.
     return (
       <div
         className="h-1 w-full overflow-hidden rounded-full bg-white/10"
@@ -394,8 +394,12 @@ function CloudProgressBar({ progress }: { progress: number }) {
         aria-label="Working"
       >
         <div className="flex h-full w-[200%] animate-marquee [animation-duration:1.4s]">
-          <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-500 to-transparent" />
-          <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-brand-500 to-transparent" />
+          <div className="flex h-full w-1/2 justify-center">
+            <div className="h-full w-2/5 rounded-full bg-brand-500" />
+          </div>
+          <div className="flex h-full w-1/2 justify-center">
+            <div className="h-full w-2/5 rounded-full bg-brand-500" />
+          </div>
         </div>
       </div>
     );
@@ -410,7 +414,7 @@ function CloudProgressBar({ progress }: { progress: number }) {
       aria-valuenow={pct}
     >
       <div
-        className="h-full rounded-full bg-gradient-to-r from-brand-500 to-spark-400 transition-[width] duration-300 ease-out"
+        className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out"
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -524,7 +528,7 @@ function CloudChecklist({
                       }`}
                     >
                       {stage.label}
-                      {done ? <span className="sr-only"> — done</span> : null}
+                      {done ? <span className="sr-only">, done</span> : null}
                     </p>
                     {active ? (
                       <p className="shrink-0 font-mono text-xs text-zinc-400">
@@ -555,7 +559,7 @@ function CloudChecklist({
           Cancel
         </Button>
         <p className="text-xs text-zinc-600">
-          Canceling stops watching the job — nothing is kept on the server
+          Canceling stops watching the job. Nothing is kept on the server
           beyond your upload.
         </p>
       </div>
@@ -753,14 +757,14 @@ export default function StudioApp() {
       picked.type.startsWith("video/") ||
       /\.(mp4|mov|webm|m4v)$/i.test(picked.name);
     if (!looksLikeVideo) {
-      setFileError("That doesn't look like a video file — try an MP4, MOV, or WebM.");
+      setFileError("That doesn't look like a video file. Try an MP4, MOV, or WebM.");
       return;
     }
 
     // The whole file has to fit in browser memory — no streaming in the beta.
     if (picked.size > MAX_SOURCE_BYTES) {
       setFileError(
-        `That file is ${formatBytes(picked.size)} — the browser has to hold the whole video in memory, so the beta caps out at 1.4 GB. Export a lower-bitrate version and try again.`
+        `That file is ${formatBytes(picked.size)}. The browser has to hold the whole video in memory, so the beta caps out at 1.4 GB. Export a lower-bitrate version and try again.`
       );
       return;
     }
@@ -770,13 +774,13 @@ export default function StudioApp() {
       const duration = await probeVideoDuration(picked);
       if (duration !== null && duration > MAX_SOURCE_SECONDS) {
         setFileError(
-          `That video runs ${formatDuration(duration)} — the browser beta caps out at 20:00. Trim it down and try again.`
+          `That video runs ${formatDuration(duration)}, and the browser beta caps out at 20:00. Trim it down and try again.`
         );
         return;
       }
       if (duration !== null && duration < 5) {
         setFileError(
-          "That video is too short to clip — give it at least a few seconds of speech."
+          "That video is too short to clip. Give it at least a few seconds of speech."
         );
         return;
       }
@@ -879,10 +883,6 @@ export default function StudioApp() {
 
   return (
     <div ref={viewRef} className="relative flex min-h-dvh flex-col bg-ink-950">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[36rem] -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
-      />
       <TopBar />
 
       <div className="relative flex-1 py-14 sm:py-20">
@@ -905,9 +905,6 @@ export default function StudioApp() {
             <div className="animate-rise">
               <div className="mx-auto flex max-w-4xl flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:justify-between sm:text-left">
                 <div>
-                  <p className="mb-4 font-mono text-xs font-medium uppercase tracking-[0.2em] text-signal-400">
-                    Done — in the cloud
-                  </p>
                   <h1
                     tabIndex={-1}
                     className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl"
@@ -917,7 +914,7 @@ export default function StudioApp() {
                   <p className="mt-3 text-sm text-zinc-400 sm:text-base">
                     <span className="font-mono">{cloudState.clips.length}</span>{" "}
                     {cloudState.clips.length === 1 ? "clip" : "clips"}, scored
-                    and captioned. Preview, then download.
+                    and captioned in the cloud. Preview, then download.
                   </p>
                 </div>
                 <Button variant="secondary" onClick={handleReset}>
@@ -989,7 +986,6 @@ export default function StudioApp() {
           ) : state.status === "idle" ? (
             <div className="animate-rise">
               <div className="mx-auto mb-10 max-w-2xl text-center">
-                <Eyebrow>Studio beta</Eyebrow>
                 <h1
                   tabIndex={-1}
                   className="font-display text-3xl font-semibold tracking-tight text-white outline-none sm:text-4xl md:text-[2.75rem] md:leading-[1.1]"
@@ -998,18 +994,19 @@ export default function StudioApp() {
                 </h1>
                 <p className="mt-4 text-base leading-relaxed text-zinc-400 sm:text-lg">
                   Pick a file. On-device AI transcribes it, scores every moment
-                  0–100, and cuts 9:16 captioned clips — no upload, no queue.
+                  from 0 to 100, and cuts 9:16 captioned clips. No upload, no
+                  queue.
                 </p>
               </div>
               {capabilities.isDesktopSafari ? (
                 <p className="mx-auto mb-6 max-w-xl rounded-xl border border-ember-500/30 bg-ember-500/[0.06] px-4 py-2.5 text-center text-xs leading-relaxed text-ember-300">
-                  Studio works best in Chrome, Edge, or Firefox — Safari may
+                  Studio works best in Chrome, Edge, or Firefox. Safari may
                   block the final render step.
                 </p>
               ) : null}
               {capabilities.gate === "cloud-only" ? (
                 <p className="mx-auto mb-6 max-w-xl rounded-xl border border-brand-500/30 bg-brand-500/[0.06] px-4 py-2.5 text-center text-xs leading-relaxed text-brand-200">
-                  You&apos;re on a phone, so Studio is set to the cloud engine —
+                  You&apos;re on a phone, so Studio is set to the cloud engine:
                   your video uploads, the server does the work, and the clips
                   come back here. The on-device engine is desktop-only.
                 </p>

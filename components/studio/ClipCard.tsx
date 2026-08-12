@@ -131,7 +131,7 @@ export default function ClipCard({
           href={clip.url}
           download={filename}
           aria-label={`Download clip ${index + 1} as ${format}`}
-          className="inline-flex min-w-0 flex-1 basis-36 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-spark-500 px-5 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_36px_rgba(139,92,246,0.55)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+          className="inline-flex min-w-0 flex-1 basis-36 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
         >
           <svg
             width="15"

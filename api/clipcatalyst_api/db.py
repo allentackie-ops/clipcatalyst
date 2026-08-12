@@ -190,6 +190,22 @@ CREATE TABLE IF NOT EXISTS usage (
     PRIMARY KEY (user_id, month)
 )
 """,
+    # Email sign-in codes (EMAILAUTH.md). The ADDRESS is the primary key, which
+    # is the storage rule doing the work: one live code per address, so a
+    # second `start` REPLACES the row and the first code stops working there
+    # and then. `code_hash` is a sha256 (auth.hash_login_code) — the six digits
+    # themselves are never written here, to a log, or to any response body.
+    # `attempts` is what makes a small secret safe (auth.LOGIN_CODE_MAX_
+    # ATTEMPTS); rows go on success, at the cap, and on the hourly sweep.
+    """
+CREATE TABLE IF NOT EXISTS login_codes (
+    email      TEXT PRIMARY KEY,
+    code_hash  TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+)
+""",
     # The clip library. `file_path` is relative to the storage backend's
     # library root (local: settings.library_dir; s3: the bucket key) and goes
     # back to '' when the reaper deletes the file — the row itself stays, which
@@ -654,6 +670,133 @@ def purge_expired_sessions() -> int:
     with contextlib.closing(_connect()) as conn:
         _ensure_schema(conn)
         cur = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (_now(),))
+        return cur.rowcount
+
+
+# --------------------------------------------------------------------------- #
+# Email sign-in codes (EMAILAUTH.md). One live code per address, stored only as
+# a hash, spent exactly once. Every function here is a state MOVE — read,
+# guess, spend, expire — and each is a single statement or a single guarded
+# transaction, because the safety of a 6-digit secret is entirely in how
+# carefully its row is accounted for.
+# --------------------------------------------------------------------------- #
+
+_LOGIN_CODE_COLUMNS = ("email", "code_hash", "expires_at", "attempts", "created_at")
+
+
+def _login_code_dict(row: sqlite3.Row) -> dict:
+    return {key: row[key] for key in _LOGIN_CODE_COLUMNS}
+
+
+def put_login_code(email: str, *, code_hash: str, expires_at: str) -> None:
+    """Store THE live code for an address, replacing whatever was there.
+
+    The upsert is the "a second start invalidates the first code" rule: one
+    row per address, and `attempts` goes back to 0 with the new code because
+    the guesses spent against the old one were spent against a different
+    secret. (Carrying them over would let anyone disable an account's code
+    sign-in by burning five guesses and never asking for a code again.)
+    """
+    now = _now()
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO login_codes (email, code_hash, expires_at, attempts,"
+            " created_at) VALUES (?, ?, ?, 0, ?)"
+            " ON CONFLICT (email) DO UPDATE SET code_hash = excluded.code_hash,"
+            " expires_at = excluded.expires_at, attempts = 0,"
+            " created_at = excluded.created_at",
+            (email, code_hash, expires_at, now),
+        )
+
+
+def get_login_code(email: str) -> dict | None:
+    """The LIVE code row for an address, else None — never a code itself.
+
+    Expiry is part of the query, exactly as it is for sessions
+    (get_session_user): ISO-8601 UTC strings from ``_now()`` compare correctly
+    as text, so a code past its TTL simply is not found. That is what makes
+    the TTL enforced rather than swept — the hourly purge only tidies rows
+    that already stopped working, and a sweep that never ran could not hand
+    anybody a stale code.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM login_codes WHERE email = ? AND expires_at > ?",
+            (email, _now()),
+        ).fetchone()
+    return None if row is None else _login_code_dict(row)
+
+
+def count_login_code_attempt(email: str, *, max_attempts: int) -> int:
+    """Charge one wrong guess to an address's code; the running count.
+
+    Returns 0 when there was no row to charge. At `max_attempts` the row is
+    DELETED in the same transaction as the increment that reached it, so the
+    cap cannot be walked past by two guesses arriving together: the count and
+    the deletion are one decision, not a read followed by a hopeful write.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?",
+                (email,),
+            )
+            if cur.rowcount != 1:
+                conn.execute("COMMIT")
+                return 0
+            row = conn.execute(
+                "SELECT attempts FROM login_codes WHERE email = ?", (email,)
+            ).fetchone()
+            attempts = 0 if row is None else int(row["attempts"])
+            if attempts >= max_attempts:
+                conn.execute("DELETE FROM login_codes WHERE email = ?", (email,))
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    return attempts
+
+
+def consume_login_code(email: str, code_hash: str) -> bool:
+    """Spend the code, once. True = this caller is the one that spent it.
+
+    The DELETE carries the hash it expects, so the row is removed only if it
+    is still the same code this caller verified — and `rowcount` is what says
+    whether we won. That is the single-use guarantee under concurrency: two
+    requests carrying the same correct code race here, SQLite serializes them,
+    and the loser is refused rather than both being signed in off one secret.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute(
+            "DELETE FROM login_codes WHERE email = ? AND code_hash = ?",
+            (email, code_hash),
+        )
+    return cur.rowcount == 1
+
+
+def delete_login_code(email: str) -> None:
+    """Drop an address's live code (expired, or a send that never went out)."""
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("DELETE FROM login_codes WHERE email = ?", (email,))
+
+
+def purge_expired_login_codes(now_iso: str) -> int:
+    """Delete codes past their expiry; returns the count (hourly sweep).
+
+    Hygiene, never security: an expired row is already refused at verify (the
+    TTL is checked against the row, not against whether a sweep has run), so
+    this exists so the table does not accumulate dead secrets — not so that
+    they stop working.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute("DELETE FROM login_codes WHERE expires_at <= ?", (now_iso,))
         return cur.rowcount
 
 

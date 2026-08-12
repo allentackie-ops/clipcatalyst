@@ -23,7 +23,7 @@ from pydantic import ValidationError
 # misses every part of a hand-parsed form (and quietly cleared the logo).
 from starlette.datastructures import UploadFile
 
-from . import auth, billing, brandkit, db, googleid
+from . import auth, billing, brandkit, db, googleid, mailer
 from .models import (
     AuthResponse,
     AuthUserOut,
@@ -40,6 +40,9 @@ from .models import (
     ClipWordOut,
     CreateJobRequest,
     CreateJobResponse,
+    EmailCodeStartRequest,
+    EmailCodeStartResponse,
+    EmailCodeVerifyRequest,
     EntitlementsOut,
     GoogleAuthRequest,
     HealthzResponse,
@@ -83,6 +86,35 @@ _GOOGLE_KEYS_UNAVAILABLE = (
 # Both halves of a Google sign-in raced: the address was claimed by another
 # account while this request was resolving it. Vanishingly rare, and honest.
 _GOOGLE_ACCOUNT_RACE = (
+    "That account was being changed at the same moment — please try signing in "
+    "again."
+)
+# --- email sign-in codes (EMAILAUTH.md) ------------------------------------- #
+# ONE refusal for every way a code can fail to sign somebody in: wrong digits,
+# a code that expired, a code whose five guesses are spent, a code that was
+# never asked for, and an address nobody has ever requested a code for. Which
+# of those it was is a server-side fact. Splitting this into helpful variants
+# would rebuild the enumeration oracle the whole flow is shaped to avoid — "no
+# code was requested for that address" tells a stranger which addresses are in
+# the middle of signing in, and "that code has expired" confirms one was.
+_EMAIL_CODE_FAILED = (
+    "That code isn't valid — it may have expired or already been used. "
+    "Request a new one."
+)
+_EMAIL_CODE_OFF = (
+    "Email sign-in codes aren't enabled on this server (CC_MAILER is none) — "
+    "sign in with your email and password instead."
+)
+# A send that did not happen is an ERROR, never a cheerful "check your inbox".
+# The user is told to try again rather than left watching an inbox nothing is
+# coming to.
+_EMAIL_CODE_SEND_FAILED = (
+    "We couldn't send your sign-in code just now — please try again in a "
+    "moment, or sign in with your password."
+)
+# The account was claimed between resolving the address and creating it.
+# Vanishingly rare, and honest — mirrors _GOOGLE_ACCOUNT_RACE.
+_EMAIL_CODE_ACCOUNT_RACE = (
     "That account was being changed at the same moment — please try signing in "
     "again."
 )
@@ -235,19 +267,27 @@ def _signed_in(user: dict) -> AuthResponse:
 
 
 def _auth_methods(user: dict) -> list[str]:
-    """How this account can be signed into (LIBRARY.md Part 1).
+    """How this account can be signed into (LIBRARY.md Part 1, EMAILAUTH.md).
 
-    Read off the row itself rather than stored as a flag, so it can never
-    drift from what the two sign-in paths actually accept: a stored password
-    hash is what `/v1/auth/login` needs, a stored `google_sub` is what
-    `/v1/auth/google` matches on. An account with neither — which nothing
-    creates — honestly reports neither.
+    Read off the row and off the server's own configuration rather than
+    stored as a flag, so it can never drift from what the sign-in paths
+    actually accept: a stored password hash is what `/v1/auth/login` needs, a
+    stored `google_sub` is what `/v1/auth/google` matches on, and a configured
+    mailer is what `/v1/auth/email/verify` needs — that last one is a property
+    of the deployment, not of the row, because a code is sent to an ADDRESS
+    and every account has one.
+
+    "email" is therefore what a password-less, Google-less account (one this
+    very flow created) reports, instead of the empty list that would leave the
+    account page unable to say how its owner gets back in.
     """
     methods: list[str] = []
     if str(user.get("password_hash") or ""):
         methods.append("password")
     if str(user.get("google_sub") or ""):
         methods.append("google")
+    if mailer.is_configured(get_settings()):
+        methods.append("email")
     return methods
 
 
@@ -290,6 +330,33 @@ def _google_account(identity: googleid.GoogleIdentity) -> dict:
         if created is not None:
             return created
     raise HTTPException(status_code=409, detail=_GOOGLE_ACCOUNT_RACE)
+
+
+def _email_code_account(email: str) -> dict:
+    """The account a verified address signs into: found, or made (EMAILAUTH.md).
+
+    Proving control of an inbox is the same assurance a password reset gives,
+    which is what makes both branches safe:
+
+      1. a row with this email — SIGN IN to it, and touch nothing else. A
+         password account keeps its hash; a Google account keeps its
+         `google_sub`. This adds a door, it does not change the locks, so
+         nobody can use a code to quietly detach an identity from an account.
+      2. nothing — create a PASSWORD-LESS account (`password_hash = ''`),
+         exactly as a first Google sign-in does.
+
+    Step 2 races a registration landing between our read and our insert. The
+    UNIQUE email is the arbiter, so the loser re-reads and signs into whoever
+    won rather than 500-ing or forking the person into two accounts.
+    """
+    for _ in range(2):
+        user = db.get_user_by_email(email)
+        if user is not None:
+            return user
+        created = db.create_user(uuid.uuid4().hex, email=email, password_hash="")
+        if created is not None:
+            return created
+    raise HTTPException(status_code=409, detail=_EMAIL_CODE_ACCOUNT_RACE)
 
 
 # --------------------------------------------------------------------------- #
@@ -713,6 +780,113 @@ def _build_router():  # noqa: ANN202 - APIRouter
                 status_code=401, detail=_GOOGLE_SIGN_IN_FAILED
             ) from None
         return _signed_in(_google_account(identity))
+
+    @router.post("/auth/email/start", response_model=EmailCodeStartResponse)
+    def email_code_start(
+        body: EmailCodeStartRequest, request: Request, response: Response
+    ) -> EmailCodeStartResponse:
+        """Mail a 6-digit sign-in code to an address (EMAILAUTH.md).
+
+        The response is the same 200 `{sent: true}` whether or not the address
+        has an account — and it is the same because this route NEVER LOOKS.
+        The account is resolved at verify time, so there is no branch here to
+        take, nothing to time, and nothing an attacker can measure: uniformity
+        is a property of the control flow rather than a pair of responses
+        somebody remembered to keep in step.
+
+        Two independent limits guard it, and each stops an attack the other
+        does not (auth.enforce_email_code_limit says which is which).
+        """
+        _no_store(response)
+        # Per CLIENT: one machine cannot farm codes. Counted first and for
+        # every caller, including the ones about to be refused below, so a
+        # flood of malformed requests is metered too.
+        _rate_limit(request, "email-start")
+        settings = get_settings()
+        if not mailer.is_configured(settings):
+            # 503, exactly like Google sign-in with no client id: a deployment
+            # state, and never a pretence that mail went out.
+            raise HTTPException(status_code=503, detail=_EMAIL_CODE_OFF)
+        email = auth.normalize_email(body.email)
+        if not auth.is_valid_email(email):
+            # About the STRING, not about any account — an address that cannot
+            # receive mail cannot be sent a code, and saying so reveals
+            # nothing about who has an account here.
+            raise HTTPException(
+                status_code=400,
+                detail="That doesn't look like a valid email address.",
+            )
+        # Per ADDRESS: nobody can be mail-bombed by a stranger typing their
+        # address over and over, however many machines it comes from.
+        auth.enforce_email_code_limit(email)
+
+        code = auth.new_login_code()
+        # Stored BEFORE the send, and only ever as a hash. If it were stored
+        # after, a fast mail provider could put the code in somebody's hand
+        # before the row it verifies against exists.
+        db.put_login_code(
+            email,
+            code_hash=auth.hash_login_code(email, code),
+            expires_at=auth.login_code_expires_at(),
+        )
+        try:
+            mailer.send_login_code(settings, email, code)
+        except mailer.MailError as error:
+            # Nothing was sent, so nothing may remain valid: drop the staged
+            # row before answering. Leaving it would mean a code exists that
+            # nobody can ever receive — an account with a live credential in
+            # limbo — and it would count against a later, real request.
+            db.delete_login_code(email)
+            logger.warning("could not send a sign-in code: %s", error)
+            raise HTTPException(
+                status_code=503, detail=_EMAIL_CODE_SEND_FAILED
+            ) from None
+        return EmailCodeStartResponse()
+
+    @router.post("/auth/email/verify", response_model=AuthResponse)
+    def email_code_verify(
+        body: EmailCodeVerifyRequest, request: Request, response: Response
+    ) -> AuthResponse:
+        """Trade a 6-digit code for a session — the same session login mints.
+
+        Every refusal below is the SAME 401 with the same body. A code that is
+        wrong, one that expired, one whose guesses are spent and one that was
+        never requested are indistinguishable from outside, because telling
+        them apart tells a stranger which addresses have codes in flight.
+        """
+        _no_store(response)
+        # Per client again: this is the route a guesser would grind, and the
+        # attempt cap below only ever protects ONE code — the limiter is what
+        # keeps somebody from spending five guesses on code after code.
+        _rate_limit(request, "email-verify")
+        email = auth.normalize_email(body.email)
+        # A code that was never requested and one whose TTL has run out are the
+        # same None here: db.get_login_code checks the expiry in SQL, the way
+        # sessions are checked, so the deadline is enforced by this read rather
+        # than by whether the hourly sweep has got around to the row.
+        row = db.get_login_code(email)
+        if row is None:
+            raise HTTPException(status_code=401, detail=_EMAIL_CODE_FAILED)
+        if not auth.login_code_matches(email, body.code, str(row["code_hash"])):
+            # A wrong guess costs one of the five this code will ever accept;
+            # db.count_login_code_attempt deletes the row at the cap, in the
+            # same transaction, so two simultaneous guesses cannot walk past it.
+            attempts = db.count_login_code_attempt(
+                email, max_attempts=auth.LOGIN_CODE_MAX_ATTEMPTS
+            )
+            logger.info(
+                "sign-in code refused (%d of %d attempts spent)",
+                attempts,
+                auth.LOGIN_CODE_MAX_ATTEMPTS,
+            )
+            raise HTTPException(status_code=401, detail=_EMAIL_CODE_FAILED)
+        # Right code — spend it. The DELETE names the hash it expects, so this
+        # is where single use is decided: if another request already consumed
+        # the row, this one loses and is refused like any other bad code
+        # rather than minting a second session from one secret.
+        if not db.consume_login_code(email, str(row["code_hash"])):
+            raise HTTPException(status_code=401, detail=_EMAIL_CODE_FAILED)
+        return _signed_in(_email_code_account(email))
 
     @router.post("/auth/logout", response_model=LogoutResponse)
     def logout(

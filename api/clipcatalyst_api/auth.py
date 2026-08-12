@@ -167,6 +167,76 @@ def session_expires_at() -> str:
     return (datetime.now(timezone.utc) + ttl).isoformat(timespec="milliseconds")
 
 
+# --------------------------------------------------------------------------- #
+# Email sign-in codes: 6 digits, hashed at rest, single use (EMAILAUTH.md).
+# --------------------------------------------------------------------------- #
+
+#: Digits in a login code. Six is what somebody can read off a phone
+#: notification and type into another device — and it is also only a million
+#: possibilities, which is why the attempt cap below, the TTL, the single-use
+#: rule and the two rate limits are not decoration around this feature: they
+#: ARE this feature's security. Widening the code is not the lever; keeping
+#: every one of those rules is.
+LOGIN_CODE_DIGITS = 6
+
+#: Guesses one code will ever accept before it is deleted and the user has to
+#: ask for another. At five, an attacker's odds against a single code are
+#: 5-in-a-million. Without a cap, 6 digits is a million guesses at whatever
+#: rate the per-client limiter allows — which is a matter of patience, not of
+#: security. Nothing about the UX improves by raising this.
+LOGIN_CODE_MAX_ATTEMPTS = 5
+
+
+def new_login_code() -> str:
+    """A fresh 6-digit code, zero-padded — the only place one is generated.
+
+    ``secrets.randbelow`` (a CSPRNG), never ``random``: this is a credential
+    for a whole account, and a predictable credential is not one. The
+    zero-padding is part of the security, not the formatting: printing the
+    integer plainly would leak its magnitude in the string's length and shrink
+    the space to the 900_000 numbers that have six digits.
+    """
+    return f"{secrets.randbelow(10 ** LOGIN_CODE_DIGITS):0{LOGIN_CODE_DIGITS}d}"
+
+
+def hash_login_code(email: str, code: str) -> str:
+    """The sha256 hex that IS stored — the code itself never is.
+
+    The digest covers the ADDRESS as well as the digits, and that is what
+    makes hashing something this small worth anything. A bare sha256 of six
+    digits is a million-entry table that anybody can precompute in about a
+    second, so a leaked database file would hand over every live code in
+    plaintext and "hashed storage" would be a word rather than a defence.
+    Binding the address gives each row its own digest space — there is no one
+    table that covers every address — and, for free, means a code minted for
+    one address can never verify another.
+
+    Do not "simplify" this to ``sha256(code)``: it would still pass every test
+    that only checks the plaintext is absent, and it would give a database
+    reader ten minutes of unrestricted account access.
+    """
+    return hashlib.sha256(
+        f"{normalize_email(email)}\x00{code}".encode("utf-8")
+    ).hexdigest()
+
+
+def login_code_matches(email: str, code: str, stored_hash: str) -> bool:
+    """Constant-time check of a submitted code against a stored digest.
+
+    ``hmac.compare_digest``, the same discipline sessions and the founder
+    token get: a plain ``==`` returns as soon as two hex strings differ, and
+    the time it took says how much of the digest was right. Both sides here
+    are our own ASCII hex, so there is nothing for the comparison to choke on.
+    """
+    return hmac.compare_digest(hash_login_code(email, code), stored_hash)
+
+
+def login_code_expires_at() -> str:
+    """When a code minted now stops working (CC_EMAIL_CODE_TTL_MINUTES)."""
+    ttl = timedelta(minutes=get_settings().email_code_ttl_minutes)
+    return (datetime.now(timezone.utc) + ttl).isoformat(timespec="milliseconds")
+
+
 def bearer_session_token(authorization: str | None) -> str | None:
     """The raw `cc_sess_…` token from an Authorization header, else None."""
     if authorization is None or not authorization.startswith(_BEARER_PREFIX):
@@ -345,6 +415,30 @@ _MEMORY_SLOTS = 1 << 16
 _memory_lock = threading.Lock()
 _memory_windows: list[tuple[int, int]] = [(-1, 0)] * _MEMORY_SLOTS
 
+# The per-ADDRESS hourly window for email sign-in codes (EMAILAUTH.md), in its
+# own table and under its own Redis prefix rather than sharing the ones above.
+# That separation is load-bearing, not tidiness: the property that makes a
+# shared slot harmless — every key in a table counts the same KIND of window,
+# so two keys in one slot merely add to each other and can only ever refuse
+# EARLIER — holds per table. Mixing minute numbers and hour numbers in one
+# array would break it in the direction that ADMITS more: a slot holding an
+# hour number looks like an expired minute to the other counter, and each
+# would silently reset the other's count. Two arrays cost 64 K tuples and
+# make that impossible instead of unlikely.
+_HOUR_TTL_S = 3600
+_HOUR_KEY_PREFIX = "cc:rlh:"
+_memory_hours: list[tuple[int, int]] = [(-1, 0)] * _MEMORY_SLOTS
+
+# The route name the per-address counter files under. Not an HTTP route: the
+# thing being metered is one email ADDRESS being sent codes, wherever the
+# requests come from.
+_EMAIL_CODE_ROUTE = "email-code"
+
+_EMAIL_CODE_RATE_LIMITED = (
+    "That address has been sent too many sign-in codes — try again in an hour, "
+    "or sign in with your password."
+)
+
 # The last minute a Redis outage was logged. Logging hygiene only — an outage
 # is every single request, and a warning per login attempt is its own incident.
 _logged_outage_minute = -1
@@ -408,6 +502,15 @@ def _current_minute() -> int:
     return int(time.time() // 60)
 
 
+def _current_hour() -> int:
+    """The window the per-address code limit counts in.
+
+    Derived from ``_current_minute`` so both limiters read one clock — which
+    also means a test that pins the minute has pinned this too.
+    """
+    return _current_minute() // 60
+
+
 def rate_limit_fails_open(settings: Settings) -> bool:
     """Whether an unreachable Redis lets credential attempts through.
 
@@ -441,20 +544,27 @@ def _memory_slot(client: str, route: str) -> int:
     return int.from_bytes(digest, "big") % _MEMORY_SLOTS
 
 
-def _count_in_memory(client: str, route: str, minute: int) -> int:
-    """Count one attempt in the in-process table; the running count.
+def _count_in_memory(
+    client: str, route: str, window: int, table: list[tuple[int, int]]
+) -> int:
+    """Count one attempt in an in-process table; the running count.
+
+    `table` is the fixed array for ONE kind of window (minutes above, hours in
+    `_memory_hours`) and `window` is that kind's window number, so every key
+    in a table speaks the same units — see the note beside `_memory_hours` for
+    why mixing them would be a bug rather than a saving.
 
     One lock, held across the whole read-modify-write, is the entire
     concurrency story: there is no second structure to keep in step and
     nothing that iterates, so there is nothing for a concurrent caller to
-    tear. A slot from an older minute is simply overwritten, which is how a
+    tear. A slot from an older window is simply overwritten, which is how a
     window ends here — no sweep, no eviction, no cap.
     """
     slot = _memory_slot(client, route)
     with _memory_lock:
-        window, count = _memory_windows[slot]
-        count = count + 1 if window == minute else 1
-        _memory_windows[slot] = (minute, count)
+        stored, count = table[slot]
+        count = count + 1 if stored == window else 1
+        table[slot] = (window, count)
     return count
 
 
@@ -486,22 +596,32 @@ def _log_redis_outage(minute: int, error: BaseException, *, fail_open: bool) -> 
     )
 
 
-def _count_attempt(client: str, route: str, minute: int) -> int | None:
+def _count_attempt(
+    client: str,
+    route: str,
+    window: int,
+    *,
+    prefix: str,
+    ttl_s: int,
+    table: list[tuple[int, int]],
+) -> int | None:
     """Count one attempt; the running count, or None if Redis was unreachable.
 
     CC_QUEUE=redis is what "this box has the Redis it needs" means here: it
     names the very instance Celery brokers on. CC_QUEUE=eager — dev and the
     test suite — has no Redis to reach, so it counts in process.
+
+    `prefix`/`ttl_s`/`table` are the window kind: the per-client minute window
+    and the per-address hour window keep separate keys in Redis and separate
+    arrays in process, so neither can ever be counted as the other.
     """
     settings = get_settings()
     if settings.queue != "redis":
-        return _count_in_memory(client, route, minute)
-    key = f"{_KEY_PREFIX}{route}:{minute}:{client}"
+        return _count_in_memory(client, route, window, table)
+    key = f"{prefix}{route}:{window}:{client}"
     try:
         return int(
-            _redis_client(settings.redis_url).eval(
-                _INCR_WINDOW_LUA, 1, key, _WINDOW_TTL_S
-            )
+            _redis_client(settings.redis_url).eval(_INCR_WINDOW_LUA, 1, key, ttl_s)
         )
     except Exception as error:  # noqa: BLE001 - any failure to count is an outage
         # Deliberately broad. A refused connection, a timeout, a redis module
@@ -510,7 +630,15 @@ def _count_attempt(client: str, route: str, minute: int) -> int | None:
         # enforce_rate_limit is what decides what that means. Narrowing this to
         # redis.RedisError would let some other failure become a 500 on an
         # unauthenticated route, which is a worse answer than either policy.
-        _log_redis_outage(minute, error, fail_open=rate_limit_fails_open(settings))
+        #
+        # The MINUTE is what the log is deduplicated on, whatever window this
+        # call was counting: both limiters share one "already warned" marker,
+        # so handing it an hour number from one caller and a minute number
+        # from the other would make them alternate and log on every single
+        # request — the exact flood this hygiene exists to prevent.
+        _log_redis_outage(
+            _current_minute(), error, fail_open=rate_limit_fails_open(settings)
+        )
         return None
 
 
@@ -523,7 +651,14 @@ def enforce_rate_limit(client: str, route: str) -> None:
     ceiling any other client is held to.
     """
     minute = _current_minute()
-    count = _count_attempt(client, route, minute)
+    count = _count_attempt(
+        client,
+        route,
+        minute,
+        prefix=_KEY_PREFIX,
+        ttl_s=_WINDOW_TTL_S,
+        table=_memory_windows,
+    )
     if count is None:
         # Redis is unreachable; fail closed unless the operator said otherwise.
         if rate_limit_fails_open(get_settings()):
@@ -533,15 +668,51 @@ def enforce_rate_limit(client: str, route: str) -> None:
         raise HTTPException(status_code=429, detail=_RATE_LIMITED)
 
 
+def enforce_email_code_limit(email: str) -> None:
+    """Count one code request for ONE address; 429 past CC_EMAIL_CODE_PER_HOUR.
+
+    The SECOND of the two limits on the email-code routes, and it exists for a
+    different attack than the first (EMAILAUTH.md). `enforce_rate_limit` meters
+    a CLIENT, so it stops one machine farming codes — but it counts the sender,
+    and a sender with a botnet, or simply a patient one, is metered per machine.
+    This counts the RECIPIENT, so a stranger cannot turn our mailer into a way
+    to bomb somebody's inbox by typing their address over and over, however
+    many addresses they send from. Neither limit substitutes for the other and
+    removing either leaves a real attack open.
+
+    Counted against the NORMALIZED address, so " Creator@Gmail.com " and
+    "creator@gmail.com" are one bucket rather than two — otherwise the limit
+    would be a formatting exercise.
+    """
+    settings = get_settings()
+    count = _count_attempt(
+        normalize_email(email),
+        _EMAIL_CODE_ROUTE,
+        _current_hour(),
+        prefix=_HOUR_KEY_PREFIX,
+        ttl_s=_HOUR_TTL_S,
+        table=_memory_hours,
+    )
+    if count is None:
+        # Same trade as the per-client limiter: an attempt that cannot be
+        # counted is refused unless the operator has taken the other side.
+        if rate_limit_fails_open(settings):
+            return
+        raise HTTPException(status_code=429, detail=_EMAIL_CODE_RATE_LIMITED)
+    if count > settings.email_code_per_hour:
+        raise HTTPException(status_code=429, detail=_EMAIL_CODE_RATE_LIMITED)
+
+
 def reset_rate_limits() -> None:
     """Forget the in-process counters and drop the Redis handle (test hook).
 
-    Only the in-process table is cleared: Redis counters name their window and
-    expire on their own, and a test that wants to look at them owns the client
-    it injected.
+    Only the in-process tables are cleared: Redis counters name their window
+    and expire on their own, and a test that wants to look at them owns the
+    client it injected.
     """
     global _logged_outage_minute
     with _memory_lock:
         _memory_windows[:] = [(-1, 0)] * _MEMORY_SLOTS
+        _memory_hours[:] = [(-1, 0)] * _MEMORY_SLOTS
         _logged_outage_minute = -1
     _redis_client.cache_clear()

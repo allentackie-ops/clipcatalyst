@@ -63,6 +63,15 @@ class Settings:
     rate_limit_fail_open: str = "off"  # "on" | "off"
     mailer: str = "none"  # "none" | "console" | "resend" — account email
     resend_api_key: str = ""  # only for CC_MAILER=resend
+    # The From: every account email is sent as. Resend accepts its own
+    # onboarding@resend.dev before a domain is verified, so the default is a
+    # value that actually delivers on a fresh key.
+    mail_from: str = "ClipCatalyst <onboarding@resend.dev>"
+    # Email sign-in codes (EMAILAUTH.md). How long one code stays valid, and
+    # how many codes ONE address may be sent per hour — the second is what
+    # stops somebody being mail-bombed by a stranger typing their address.
+    email_code_ttl_minutes: int = 10
+    email_code_per_hour: int = 5
     billing: str = "off"  # "stripe" | "fake" | "off" — plan upgrades
     stripe_secret_key: str = ""  # sk_… (never logged)
     stripe_webhook_secret: str = ""  # whsec_… — webhook signature verification
@@ -241,6 +250,11 @@ def get_settings() -> Settings:
         rate_limit_fail_open=os.environ.get("CC_RATE_LIMIT_FAIL_OPEN", "off"),
         mailer=os.environ.get("CC_MAILER", "none"),
         resend_api_key=os.environ.get("CC_RESEND_API_KEY", ""),
+        mail_from=os.environ.get(
+            "CC_MAIL_FROM", "ClipCatalyst <onboarding@resend.dev>"
+        ).strip(),
+        email_code_ttl_minutes=int(os.environ.get("CC_EMAIL_CODE_TTL_MINUTES", "10")),
+        email_code_per_hour=int(os.environ.get("CC_EMAIL_CODE_PER_HOUR", "5")),
         billing=os.environ.get("CC_BILLING", "off"),
         stripe_secret_key=os.environ.get("CC_STRIPE_SECRET_KEY", ""),
         stripe_webhook_secret=os.environ.get("CC_STRIPE_WEBHOOK_SECRET", ""),

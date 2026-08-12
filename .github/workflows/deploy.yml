@@ -40,6 +40,12 @@ jobs:
           # "Sign in with Google" button never renders and Google's script is
           # never loaded; email and password are unaffected either way.
           NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          # Repository variable MAILER — the same value the API runs with
+          # (CC_MAILER: none | console | resend). Unset or "none" = the
+          # "Email me a code" option is not rendered at all, because the
+          # endpoint behind it would answer 503; password and Google are
+          # unaffected either way (EMAILAUTH.md).
+          NEXT_PUBLIC_MAILER: ${{ vars.MAILER }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./out

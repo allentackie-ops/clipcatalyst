@@ -31,10 +31,12 @@ export type AccountUser = {
   plan_status: string;
   /** limit null = unlimited. */
   quota: { limit: number | null; used: number; month: string };
-  /** How this account can be signed into: ["password"], ["google"], or both
-   *  (LIBRARY.md Part 1). Optional so a server from before Google sign-in
-   *  still parses; absent means "the server didn't say", which the UI treats
-   *  as nothing to show rather than as "no way in". */
+  /** How this account can be signed into: any of "password", "google" and
+   *  "email" (LIBRARY.md Part 1, EMAILAUTH.md). Optional so a server from
+   *  before Google sign-in still parses; absent means "the server didn't
+   *  say", which the UI treats as nothing to show rather than as "no way in".
+   *  "email" is present whenever the server has a mailer — a code goes to an
+   *  address, and every account has one. */
   auth_methods?: string[];
   entitlements: {
     max_height: number;
@@ -174,6 +176,45 @@ export async function login(email: string, password: string): Promise<void> {
 export async function signInWithGoogle(idToken: string): Promise<void> {
   const res = await request<AuthResponse>("/v1/auth/google", {
     body: { id_token: idToken },
+  });
+  setToken(res.token);
+}
+
+/**
+ * POST /v1/auth/email/start — mail a 6-digit sign-in code to an address.
+ *
+ * Always answers the same 200 whether or not the address has an account
+ * (EMAILAUTH.md): the account is created or found when the code is VERIFIED,
+ * so there is nothing here for anyone to enumerate with — and nothing for
+ * this function to report back beyond "it went". A code, not a magic link,
+ * because corporate mail scanners and link-preview bots fetch URLs in
+ * incoming mail and would consume a one-time link before its owner ever
+ * clicked it.
+ *
+ * 503 means the server has no mailer (CC_MAILER=none) or could not send;
+ * 429 means too many codes for that address or from this machine. Both
+ * arrive as the server's own sentence, which the caller shows verbatim.
+ */
+export async function startEmailCode(email: string): Promise<void> {
+  await request<{ sent: boolean }>("/v1/auth/email/start", { body: { email } });
+}
+
+/**
+ * POST /v1/auth/email/verify — trade the code for a session (stores it).
+ *
+ * The session that comes back is the one `/v1/auth/login` mints: same TTL,
+ * same bearer, same everything downstream. A 401 covers wrong, expired,
+ * already-used and never-requested alike — deliberately one answer, so the
+ * endpoint cannot be asked which addresses have codes in flight — so the
+ * caller says "that code didn't work, request a new one" and never tries to
+ * infer more than that.
+ */
+export async function verifyEmailCode(
+  email: string,
+  code: string
+): Promise<void> {
+  const res = await request<AuthResponse>("/v1/auth/email/verify", {
+    body: { email, code },
   });
   setToken(res.token);
 }

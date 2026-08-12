@@ -104,6 +104,42 @@ class GoogleAuthRequest(BaseModel):
     id_token: str = Field(min_length=1, max_length=8192)
 
 
+class EmailCodeStartRequest(BaseModel):
+    """``POST /v1/auth/email/start`` — send a 6-digit code to this address.
+
+    Only the address, deliberately: nothing about the caller decides what is
+    sent or where, and the route never looks up whether an account exists, so
+    there is nothing here to enumerate with.
+    """
+
+    email: str = Field(min_length=3, max_length=254)
+
+
+class EmailCodeStartResponse(BaseModel):
+    """The ONE body ``start`` ever returns on success.
+
+    Byte-identical for an address with an account and one without — that
+    identity is the anti-enumeration property, so this model has no field that
+    could ever differ between the two.
+    """
+
+    sent: bool = True
+
+
+class EmailCodeVerifyRequest(BaseModel):
+    """``POST /v1/auth/email/verify`` — trade a code for a session.
+
+    `code` is bounded but not shaped: the length is a parser guard, and every
+    substantive refusal — wrong, expired, exhausted, never requested — must
+    collapse into the same 401, so a 6-character rule here (which would answer
+    422 for a 7-character guess) would be a distinguishable answer the spec
+    does not allow.
+    """
+
+    email: str = Field(min_length=1, max_length=254)
+    code: str = Field(min_length=1, max_length=64)
+
+
 class AuthUserOut(BaseModel):
     id: str
     email: str
@@ -170,9 +206,11 @@ class MeResponse(BaseModel):
     email: str
     plan: str
     plan_status: str
-    # How this account can be signed into: ["password"], ["google"], or both
-    # (LIBRARY.md Part 1). The account page reads it to say so out loud, and
-    # to never offer "change password" on a password-less account.
+    # How this account can be signed into: any of "password", "google" and
+    # "email" (LIBRARY.md Part 1, EMAILAUTH.md). The account page reads it to
+    # say so out loud, and to never offer "change password" on a password-less
+    # account. "email" is present whenever the server has a mailer, since a
+    # code is sent to an address and every account has one.
     auth_methods: list[str] = Field(default_factory=list)
     quota: QuotaOut
     entitlements: EntitlementsOut

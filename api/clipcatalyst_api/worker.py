@@ -892,6 +892,17 @@ def reap_expired_clips() -> int:
     return reaped
 
 
+def purge_expired_login_codes() -> int:
+    """Delete sign-in codes past their TTL; returns the count (EMAILAUTH.md).
+
+    A tidy-up, not an enforcement: an expired code is already refused at
+    verify, so a box whose beat never ran is no less safe — only untidier.
+    """
+    db.init_db()
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return db.purge_expired_login_codes(now)
+
+
 @celery_app.task(name="clipcatalyst.reap_expired")
 def reap_expired_task() -> int:
     """Celery entry point for the hourly maintenance sweep (run by beat).
@@ -906,6 +917,11 @@ def reap_expired_task() -> int:
     The library's own retention runs on the same tick and is independent in
     both directions: it never touches a job, and the job reaper never touches
     a library file.
+
+    Expired sign-in codes are swept here too (EMAILAUTH.md). Hygiene only:
+    they already stopped working the moment their TTL passed, because
+    db.get_login_code will not return an expired row — this is what keeps dead
+    secrets from accumulating in the table, not what makes them dead.
     """
     stalled = reconcile_stalled()
     if stalled:
@@ -916,4 +932,7 @@ def reap_expired_task() -> int:
     expired_clips = reap_expired_clips()
     if expired_clips:
         logger.info("retention removed %d expired clip file(s)", expired_clips)
+    expired_codes = purge_expired_login_codes()
+    if expired_codes:
+        logger.info("swept %d expired sign-in code(s)", expired_codes)
     return count

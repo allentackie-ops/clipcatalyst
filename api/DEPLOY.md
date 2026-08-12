@@ -83,8 +83,18 @@ npm run build
 ```
 
 Leave it unset and the Google button never renders — Google's script is never
-even fetched — while email and password carry on unchanged. (On GitHub Pages
-both come from repository variables: `CLOUD_API` and `GOOGLE_CLIENT_ID`.)
+even fetched — while email and password carry on unchanged.
+
+Email code sign-in is baked in the same way, and must agree with the server's
+`CC_MAILER` (see §6.1):
+
+```bash
+NEXT_PUBLIC_MAILER=resend npm run build
+```
+
+Unset (or `none`) and the "Email me a code" option is not rendered at all.
+(On GitHub Pages all three come from repository variables: `CLOUD_API`,
+`GOOGLE_CLIENT_ID` and `MAILER`.)
 
 Two things must line up:
 
@@ -157,6 +167,41 @@ watermark, and `POST /v1/jobs/{id}/start` answers 402 once the plan's monthly
 clip quota is spent. `CC_BILLING=fake` is the offline dev gateway (tests, and
 driving the account UI without a Stripe account) — webhooks are
 signature-verified in fake mode too.
+
+### 6.1 Email code sign-in (the third door)
+
+Type an address, get 6 digits by email, type them back. No password to invent,
+no OAuth console, no consent screen — and, once it is on, the option the
+account page leads with. It needs a mailer and nothing else:
+
+```
+CC_MAILER=resend
+CC_RESEND_API_KEY=re_...
+CC_MAIL_FROM=ClipCatalyst <onboarding@resend.dev>   # until your domain verifies
+```
+
+Then rebuild the frontend so the card renders the option (same build-time
+switch discipline as Google — an unset value renders nothing rather than a
+control that cannot work):
+
+```bash
+NEXT_PUBLIC_CLOUD_API=https://your-box.example.com \
+NEXT_PUBLIC_MAILER=resend \
+npm run build
+```
+
+`CC_MAILER=console` prints the whole email, code included, to the API log —
+**development only**, since it is the one place a code exists in plaintext.
+`CC_MAILER=none` (the default) means the endpoint answers an honest 503 and no
+code UI is built at all; email and password and Google are unaffected either
+way.
+
+What keeps six digits safe, all of it on by default: a code dies after **5**
+wrong guesses, expires after `CC_EMAIL_CODE_TTL_MINUTES` (10), works once, is
+stored only as a hash, and is metered twice — `CC_EMAIL_CODE_PER_HOUR` (5)
+codes per **address** per hour, so nobody can be mail-bombed by a stranger
+typing their address, and the ordinary 10/min per **client** on both routes.
+A send that fails is a 503, never a cheerful "check your inbox".
 
 ## 7. Security — do this before you expose the box publicly
 

@@ -30,6 +30,8 @@ import {
   login,
   portal,
   register,
+  startEmailCode,
+  verifyEmailCode,
   type AccountUser,
   type Plan,
 } from "@/lib/account";
@@ -67,6 +69,24 @@ const PAID_PLANS: {
 const INPUT_CLS =
   "w-full rounded-full border border-line-strong bg-white/5 px-5 py-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-500 focus:border-brand-400/70 focus:ring-2 focus:ring-brand-400/40";
 
+/** CC_MAILER as this build was told about it ("none" | "console" | "resend").
+ *  Baked in at build time, exactly like NEXT_PUBLIC_GOOGLE_CLIENT_ID and for
+ *  the same reason: the frontend is a static export with no server, and the
+ *  card has to decide what to render while nobody is signed in — so it cannot
+ *  ask `/v1/me`, which needs a session it does not have yet. */
+const MAILER = (process.env.NEXT_PUBLIC_MAILER ?? "").trim().toLowerCase();
+
+/** Whether the code option can exist at all: an API to talk to, and a mailer
+ *  behind it. Off, nothing about it is rendered — same discipline as the
+ *  Google button, because a control that cannot work is worse than no control
+ *  (EMAILAUTH.md). */
+const emailCodeEnabled = cloudEnabled && MAILER !== "" && MAILER !== "none";
+
+/** How long before "Resend code" appears, in seconds. Long enough that mail
+ *  in flight has a chance to land — a resend invalidates the code already on
+ *  its way, so an impatient click makes the email in the inbox WRONG. */
+const RESEND_AFTER_SECONDS = 30;
+
 /** 1280 → "720p", 1920 → "1080p", 3840 → "4K" (max_height is the long side). */
 function heightLabel(maxHeight: number): string {
   if (maxHeight >= 3840) return "4K";
@@ -103,7 +123,229 @@ function OfflineCard() {
   );
 }
 
-// ---- 2. Signed out: one card, tabbed ---------------------------------------
+// ---- 2. Signed out: one card ------------------------------------------------
+// It leads with the email code (EMAILAUTH.md): no password to invent, no
+// consent screen, and the same two taps on every device. Password and Google
+// stay below the divider — this is a third door, not a replacement.
+
+/** The email-code flow: address → code → signed in.
+ *
+ * A code rather than a link, deliberately: corporate mail scanners and
+ * link-preview bots fetch URLs in incoming mail, which silently consumes a
+ * one-time link before the human ever clicks it. A typed code cannot be
+ * consumed by a scanner, and it works when the mail lands on a phone and the
+ * browser is on a laptop.
+ */
+function EmailCodeForm() {
+  const { refresh } = useAccount();
+  const [stage, setStage] = useState<"address" | "code">("address");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [wait, setWait] = useState(0);
+  const codeRef = useRef<HTMLInputElement>(null);
+
+  // One timeout per remaining second, cleared on unmount — a plain interval
+  // would keep firing into a component that has gone (this card unmounts the
+  // moment the sign-in lands).
+  useEffect(() => {
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setWait((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
+
+  // Land the cursor where the digits go, so the code can be typed (or filled
+  // from the notification) without a tap.
+  useEffect(() => {
+    if (stage === "code") codeRef.current?.focus();
+  }, [stage]);
+
+  const sendCode = async (again: boolean) => {
+    if (busy) return;
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      await startEmailCode(email);
+      setStage("code");
+      setCode("");
+      setWait(RESEND_AFTER_SECONDS);
+      if (again) setNote("New code sent — the previous one no longer works.");
+    } catch (err) {
+      // The server's own sentence: 503 (no mailer, or the send failed) and
+      // 429 (too many codes for this address, or from this machine) both say
+      // something true that a generic message would throw away.
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Couldn't send that code — try again."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleVerify = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (busy) return;
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      await verifyEmailCode(email, code);
+      await refresh(); // flips the page to the dashboard; this unmounts
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "That code didn't work — try again."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const useAnotherAddress = () => {
+    setStage("address");
+    setCode("");
+    setError(null);
+    setNote(null);
+    setWait(0);
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h2 className="font-display text-base font-semibold tracking-tight text-white">
+          Email me a code
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+          {stage === "address"
+            ? "No password to remember — we'll send you a 6-digit code."
+            : `Enter the 6-digit code we sent to ${email}.`}
+        </p>
+      </div>
+
+      {stage === "address" ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendCode(false);
+          }}
+          className="flex flex-col gap-4"
+        >
+          <div className="flex flex-col gap-2">
+            <label
+              htmlFor="code-email"
+              className="text-sm font-medium text-zinc-300"
+            >
+              Email
+            </label>
+            <input
+              id="code-email"
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="you@studio.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={INPUT_CLS}
+            />
+          </div>
+          <Button type="submit" className="w-full">
+            {busy ? "Sending your code…" : "Send code"}
+          </Button>
+        </form>
+      ) : (
+        <form onSubmit={handleVerify} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <label
+              htmlFor="account-code"
+              className="text-sm font-medium text-zinc-300"
+            >
+              6-digit code
+            </label>
+            {/* inputMode="numeric" brings up the number pad; the
+                autoComplete token is what makes iOS and Android offer the
+                code straight from the notification, so it never has to be
+                memorised between two apps. Non-digits are dropped as they
+                are typed — a pasted "123 456" should just work. */}
+            <input
+              ref={codeRef}
+              id="account-code"
+              type="text"
+              required
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="123456"
+              value={code}
+              onChange={(e) =>
+                setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+              }
+              className={`${INPUT_CLS} text-center font-mono text-lg tracking-[0.5em]`}
+            />
+            <p className="text-xs leading-relaxed text-zinc-500">
+              Codes expire after a few minutes and work once. Nobody at
+              ClipCatalyst will ever ask you for yours.
+            </p>
+          </div>
+          {/* No auto-submit on the sixth digit: a mistyped code would spend
+              one of the five attempts this code will ever accept before its
+              owner had finished looking at it. */}
+          <Button type="submit" className="w-full">
+            {busy ? "Signing you in…" : "Verify"}
+          </Button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={useAnotherAddress}
+              className="text-xs text-zinc-400 underline decoration-line-strong underline-offset-4 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              Use a different address
+            </button>
+            {wait > 0 ? (
+              <span className="font-mono text-xs text-zinc-600">
+                Resend in {wait}s
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void sendCode(true)}
+                className="text-xs text-brand-300 underline decoration-brand-400/40 underline-offset-4 transition-colors hover:text-brand-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+              >
+                Resend code
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+
+      <div aria-live="polite" className="flex flex-col gap-1 empty:hidden">
+        {note ? <p className="text-sm text-brand-300">{note}</p> : null}
+        {error ? (
+          <p role="alert" className="text-sm leading-relaxed text-ember-300">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The "or" rule between two ways in. Google's button brings its own. */
+function OrDivider() {
+  return (
+    <div className="my-6 flex items-center gap-3" aria-hidden>
+      <span className="h-px flex-1 bg-line" />
+      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+        or
+      </span>
+      <span className="h-px flex-1 bg-line" />
+    </div>
+  );
+}
 
 const AUTH_TABS = [
   { id: "signin", label: "Sign in" },
@@ -165,6 +407,16 @@ function AuthCard() {
 
   return (
     <Card className="p-6 sm:p-8">
+      {/* The code flow leads (EMAILAUTH.md) — and renders at all only when
+          this build knows the server has a mailer, so the divider below it
+          belongs to the same condition: no code option, no orphaned "or". */}
+      {emailCodeEnabled ? (
+        <>
+          <EmailCodeForm />
+          <OrDivider />
+        </>
+      ) : null}
+
       <div
         role="tablist"
         aria-label="Sign in or create account"
@@ -273,15 +525,25 @@ function AuthCard() {
 }
 
 /** How this account signs in, said plainly. Read from /v1/me's `auth_methods`
- *  so it can never disagree with what the two sign-in paths accept — an
- *  account created with Google has no password to change. */
+ *  so it can never disagree with what the sign-in paths accept — an account
+ *  created with Google (or with an emailed code) has no password to change,
+ *  and a server with no mailer never reports "email". */
 function authMethodsLine(methods: string[] | undefined): string {
-  if (!methods || methods.length === 0) return "";
-  const google = methods.includes("google");
-  const password = methods.includes("password");
-  if (google && password) return "Signs in with Google or a password.";
-  if (google) return "Signs in with Google.";
-  return "Signs in with an email and password.";
+  const known = ["password", "google", "email"] as const;
+  const labels: Record<(typeof known)[number], string> = {
+    password: "a password",
+    google: "Google",
+    email: "an emailed code",
+  };
+  const ways = known
+    .filter((method) => methods?.includes(method))
+    .map((method) => labels[method]);
+  if (ways.length === 0) return "";
+  const list =
+    ways.length === 1
+      ? ways[0]
+      : `${ways.slice(0, -1).join(", ")} or ${ways[ways.length - 1]}`;
+  return `Signs in with ${list}.`;
 }
 
 // ---- 3. Signed in: plan / usage / upgrades ---------------------------------

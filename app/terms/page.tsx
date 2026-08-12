@@ -70,6 +70,14 @@ const SECTIONS: DocSection[] = [
           ]}
         />
         <P>
+          You can also connect a YouTube channel so clips you choose can be
+          posted to it. A post made through ClipCatalyst is still your post:
+          YouTube&apos;s own terms apply to it, you are responsible for what goes
+          up, and nothing is ever posted without you asking for it. What we store
+          for a connection, and how to revoke it, is in the{" "}
+          <DocLink href="/privacy#connections">Privacy Policy</DocLink>.
+        </P>
+        <P>
           Features described on our marketing pages are not all available yet.
           What the product does when you use it is what you are buying; nothing
           on a marketing page is a term of this agreement.
@@ -128,7 +136,10 @@ const SECTIONS: DocSection[] = [
         <P>
           We do not use your video, audio, transcripts or clips to train or
           fine-tune any model. See{" "}
-          <DocLink href="/privacy#never">Privacy, section 11</DocLink>.
+          <DocLink href="/privacy#never">
+            Privacy: what we do not do
+          </DocLink>
+          .
         </P>
       </>
     ),
@@ -216,7 +227,10 @@ const SECTIONS: DocSection[] = [
               Clip retention follows your plan (7 / 30 / 90 days, or
               indefinitely). Upgrading extends clips you already saved;
               downgrading never shortens them. See{" "}
-              <DocLink href="/privacy#library">Privacy, section 04</DocLink>.
+              <DocLink href="/privacy#library">
+                Privacy: your library
+              </DocLink>
+              .
             </>,
           ]}
         />
@@ -331,8 +345,9 @@ const SECTIONS: DocSection[] = [
           items={[
             <>
               <Em>You delete</Em>: any clip in your library, file and record
-              both; your brand kit, logo file included; your account, by writing
-              to <MailLink />.
+              both; your brand kit, logo file included; a connected channel,
+              which is revoked with the platform and then removed here; your
+              account, by writing to <MailLink />.
             </>,
             <>
               <Em>We delete automatically</Em>: an uploaded source, as soon as
@@ -343,8 +358,12 @@ const SECTIONS: DocSection[] = [
             </>,
             <>
               <Em>We may terminate</Em> an account for a serious or repeated
-              breach of section 05, or for any reason on reasonable notice, in
-              which case we refund any unused prepaid period.
+              breach of{" "}
+              <DocLink href="#acceptable-use">
+                what you may not upload or do
+              </DocLink>
+              , or for any reason on reasonable notice, in which case we refund
+              any unused prepaid period.
             </>,
           ]}
         />

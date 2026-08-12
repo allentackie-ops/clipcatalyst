@@ -27,6 +27,10 @@ reach:
 - ``library_clip_file(file_path)`` — a local file the API can serve, or None.
 - ``library_clip_url(file_path)`` — a URL to send the browser to instead
   ('' when the file is local and the API serves it itself).
+- ``fetch_library_clip(file_path, dest)`` — a local file to READ, downloading to
+  ``dest`` when the backend has no local copy. What publishing uses: an adapter
+  streams bytes off a path and must not have to know where this product keeps
+  video (PUBLISH.md Part 3).
 - ``delete_library_clip(file_path)`` — remove one stored clip.
 
 boto3 (and its bundled botocore) are imported lazily so the API/worker
@@ -77,6 +81,8 @@ class Storage(Protocol):
     def library_clip_file(self, file_path: str) -> Path | None: ...
 
     def library_clip_url(self, file_path: str) -> str: ...
+
+    def fetch_library_clip(self, file_path: str, dest: Path) -> Path | None: ...
 
     def delete_library_clip(self, file_path: str) -> None: ...
 
@@ -164,6 +170,15 @@ class LocalStorage:
         """Local files are served by the API itself — there is nowhere to send
         the browser instead."""
         return ""
+
+    def fetch_library_clip(self, file_path: str, dest: Path) -> Path | None:
+        """The stored clip, already on this disk — `dest` is never written.
+
+        Returning the real path rather than a copy is the point: a publish
+        streams the file straight out of the library, so a local box spends no
+        extra disk (and no extra time) to post a clip it already has.
+        """
+        return self.library_clip_file(file_path)
 
     def delete_library_clip(self, file_path: str) -> None:
         """Delete one stored clip, and prune the directory it leaves empty.
@@ -347,6 +362,26 @@ class S3Storage:
             Params={"Bucket": self._settings.s3_bucket, "Key": file_path},
             ExpiresIn=_PRESIGNED_GET_EXPIRES,
         )
+
+    def fetch_library_clip(self, file_path: str, dest: Path) -> Path | None:
+        """Download a stored clip to `dest` so a publish can stream it.
+
+        The caller owns `dest` and deletes it afterwards (worker._publish_run):
+        this is a staging copy of somebody's video, and leaving it in the tmp
+        directory would slowly turn "the clip expired and was deleted" into a
+        promise the disk does not keep. A missing object returns None, which the
+        caller reports as an expired clip rather than as a crash.
+        """
+        from botocore.exceptions import ClientError
+
+        if not file_path:
+            return None
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._s3().download_file(self._settings.s3_bucket, file_path, str(dest))
+        except ClientError:
+            return None
+        return dest
 
     def delete_library_clip(self, file_path: str) -> None:
         """Delete one stored clip. Raises — see LocalStorage for why."""

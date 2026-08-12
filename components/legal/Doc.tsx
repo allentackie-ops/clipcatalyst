@@ -10,6 +10,7 @@
 // Both pages are built from a SECTIONS array so the contents list and the body
 // are rendered from one source and can never drift apart.
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
@@ -99,11 +100,39 @@ export function MailLink() {
   );
 }
 
-/** An in-site link inside body copy (the two documents point at each other). */
+/**
+ * An in-site link inside body copy (the two documents point at each other).
+ *
+ * A route link goes through next/link, which is what applies `basePath` — on
+ * GitHub Pages the site lives under /clipcatalyst, and a raw `<a href="/terms">`
+ * exports as a 404 there. A pure `#section` anchor stays a plain anchor: it is
+ * the same document, and a client-side navigation to it would only cost a
+ * re-render to end up in the same place.
+ */
 export function DocLink({ href, children }: { href: string; children: ReactNode }) {
+  const className =
+    "text-brand-300 underline decoration-brand-400/40 underline-offset-4 transition-colors hover:text-brand-200";
+  if (href.startsWith("#")) {
+    return (
+      <a href={href} className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  );
+}
+
+/** A link off the site — the platform policies these documents must cite. */
+export function ExtLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
       href={href}
+      target="_blank"
+      rel="noopener noreferrer"
       className="text-brand-300 underline decoration-brand-400/40 underline-offset-4 transition-colors hover:text-brand-200"
     >
       {children}
@@ -143,7 +172,10 @@ export default function DocPage({
             className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-600/15 blur-[120px]"
           />
           <Container className="relative">
-            <header className="max-w-2xl">
+            {/* Same measure as the body column below, so the title, the lede
+                and the first paragraph of the document share a left AND a
+                right edge on a wide screen. */}
+            <header className="max-w-[36rem]">
               <Eyebrow>{eyebrow}</Eyebrow>
               <h1 className="font-display text-3xl font-semibold tracking-tight text-white sm:text-4xl md:text-[2.75rem] md:leading-[1.1]">
                 {title}
@@ -156,10 +188,15 @@ export default function DocPage({
               </p>
             </header>
 
-            <div className="mt-12 grid gap-12 md:mt-16 lg:grid-cols-[14rem_minmax(0,40rem)] lg:gap-16">
+            {/* Contents FIRST in the DOM — on a phone it belongs at the top of
+                the document, and it is the first thing a screen reader should
+                meet. On a wide screen `order` moves it to the right-hand rail,
+                which puts the prose back on the same left edge as the title
+                instead of indenting the whole document by the rail's width. */}
+            <div className="mt-12 grid gap-12 md:mt-16 lg:grid-cols-[minmax(0,36rem)_14rem] lg:gap-16">
               <nav
                 aria-label="On this page"
-                className="lg:sticky lg:top-24 lg:self-start"
+                className="lg:sticky lg:top-24 lg:order-2 lg:self-start"
               >
                 <h2 className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">
                   Contents
@@ -181,7 +218,7 @@ export default function DocPage({
                 </ol>
               </nav>
 
-              <div className="flex flex-col gap-14">
+              <div className="flex flex-col gap-14 lg:order-1">
                 {sections.map((section, i) => (
                   <section
                     key={section.id}

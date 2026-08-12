@@ -128,6 +128,57 @@ _OAUTH_STATE_COLUMNS = (
     "expires_at",
 )
 
+#: One attempt to post one clip to one connected channel (PUBLISH.md Part 3).
+#: Deliberately the same SHAPE as a jobs row — a status somebody polls, a
+#: fraction, a line of prose and a user-facing error — because it is the same
+#: kind of thing: work handed to the queue that a browser watches.
+#:
+#: What it does NOT carry is any secret. The access token comes from
+#: connections.py at upload time and the resumable session URL (which is itself
+#: a bearer capability for the channel) lives only in the running task, so a
+#: publish row is safe to read, log and hand back.
+_PUBLISH_COLUMNS = (
+    "id",
+    "user_id",
+    "clip_id",
+    "connection_id",
+    "platform",
+    "status",
+    "progress",
+    "detail",
+    "error",
+    "title",
+    "description",
+    "privacy",
+    "video_id",
+    "video_url",
+    "created_at",
+    "updated_at",
+)
+
+# Progress bookkeeping and the result, and nothing else. `status` is absent for
+# exactly the reason it is absent from _UPDATABLE: every status write names the
+# status it expects to replace (transition_publish_status), so a task that has
+# lost its row cannot overwrite a terminal state somebody else already wrote.
+# The metadata columns are absent too — what was asked for is what was asked
+# for, and a row that rewrote its own title would make the record of a post
+# disagree with the post.
+_PUBLISH_UPDATABLE = {
+    "progress",
+    "detail",
+    "error",
+    "video_id",
+    "video_url",
+}
+
+#: The non-terminal publish statuses: the only ones a worker may claim, and the
+#: only ones the stall sweep may fail. `done` and `failed` are terminal.
+LIVE_PUBLISH_STATUSES = ("queued", "uploading")
+
+_PUBLISH_INTERRUPTED_ERROR = (
+    "The upload stopped before it finished — please try posting this clip again."
+)
+
 _USER_COLUMNS = (
     "id",
     "email",
@@ -332,11 +383,47 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     expires_at   TEXT NOT NULL
 )
 """,
+    # One publish attempt (PUBLISH.md Part 3). It points at a clip and at a
+    # connection rather than copying either: the clip's file may expire between
+    # the request and the upload (which is a refusal, not a 500), and the
+    # connection's tokens may be refreshed or revoked in the same window, so
+    # both are re-read when the task actually runs.
+    #
+    # `title`, `description` and `privacy` ARE copied, because they are what the
+    # user asked for at the moment they asked — the record of a post must not
+    # change under it if the clip is later renamed.
+    """
+CREATE TABLE IF NOT EXISTS publish_jobs (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    clip_id       TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    platform      TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    progress      REAL NOT NULL DEFAULT 0,
+    detail        TEXT NOT NULL DEFAULT '',
+    error         TEXT,
+    title         TEXT NOT NULL DEFAULT '',
+    description   TEXT NOT NULL DEFAULT '',
+    privacy       TEXT NOT NULL DEFAULT 'private',
+    video_id      TEXT NOT NULL DEFAULT '',
+    video_url     TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+)
+""",
     # The library list is always "this user's clips, newest first" — the index
     # is that query.
     """
 CREATE INDEX IF NOT EXISTS clips_user_created
     ON clips (user_id, created_at DESC)
+""",
+    # "Is this clip already on its way to that platform?" — the guard that keeps
+    # a double-tapped Post button from spending two of a very small daily upload
+    # quota on one video (see create_publish_job).
+    """
+CREATE INDEX IF NOT EXISTS publish_jobs_clip
+    ON publish_jobs (clip_id, platform)
 """,
     # The reaper's query is "every clip whose file has outlived its window",
     # across all users; '' means never and sorts before every real timestamp,
@@ -1643,5 +1730,228 @@ def purge_expired_oauth_states(now_iso: str | None = None) -> int:
         _ensure_schema(conn)
         cur = conn.execute(
             "DELETE FROM oauth_states WHERE expires_at <= ?", (now_iso or _now(),)
+        )
+        return cur.rowcount
+
+
+# --------------------------------------------------------------------------- #
+# Publish jobs (PUBLISH.md Part 3).
+#
+# The jobs table's shape, with the same rule about who may write a status: a
+# publish is queue work a browser polls, and the only thing that makes its
+# progress trustworthy is that a run which has lost its row cannot write to it.
+# --------------------------------------------------------------------------- #
+
+
+def _publish_dict(row: sqlite3.Row) -> dict:
+    return {key: row[key] for key in _PUBLISH_COLUMNS}
+
+
+def create_publish_job(
+    publish_id: str,
+    *,
+    user_id: str,
+    clip_id: str,
+    connection_id: str,
+    platform: str,
+    title: str,
+    description: str,
+    privacy: str,
+) -> dict | None:
+    """Queue one publish. None when this clip is ALREADY on its way there.
+
+    The check and the insert are one transaction, so a double-tapped Post
+    button — or two tabs — cannot both win. That guard is not tidiness: a
+    default YouTube project gets a handful of uploads a day (PUBLISH.md), so a
+    duplicate does not just make a duplicate video, it spends a scarce resource
+    the user cannot get back until tomorrow.
+
+    Scoped to (user, clip, platform): the same clip may be on its way to two
+    different platforms at once, and two accounts never share a clip anyway.
+    """
+    now = _now()
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            placeholders = ", ".join("?" for _ in LIVE_PUBLISH_STATUSES)
+            live = conn.execute(
+                "SELECT * FROM publish_jobs WHERE user_id = ? AND clip_id = ?"
+                f" AND platform = ? AND status IN ({placeholders})"
+                " ORDER BY created_at LIMIT 1",
+                (user_id, clip_id, platform, *LIVE_PUBLISH_STATUSES),
+            ).fetchone()
+            if live is not None:
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "INSERT INTO publish_jobs (id, user_id, clip_id, connection_id,"
+                " platform, status, progress, detail, error, title, description,"
+                " privacy, video_id, video_url, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    publish_id,
+                    user_id,
+                    clip_id,
+                    connection_id,
+                    platform,
+                    "queued",
+                    0.0,
+                    "Queued",
+                    None,
+                    title,
+                    description,
+                    privacy,
+                    "",
+                    "",
+                    now,
+                    now,
+                ),
+            )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    published = get_publish_job(publish_id)
+    assert published is not None  # we just inserted it
+    return published
+
+
+def get_publish_job(publish_id: str) -> dict | None:
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM publish_jobs WHERE id = ?", (publish_id,)
+        ).fetchone()
+    return None if row is None else _publish_dict(row)
+
+
+def live_publish_job(user_id: str, clip_id: str, platform: str) -> dict | None:
+    """The publish already in flight for this clip on this platform, else None.
+
+    What the start route reports back when create_publish_job refuses, so the
+    answer to "post this again" is the job that is already running rather than
+    a bare refusal with nothing to poll.
+    """
+    placeholders = ", ".join("?" for _ in LIVE_PUBLISH_STATUSES)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT * FROM publish_jobs WHERE user_id = ? AND clip_id = ?"
+            f" AND platform = ? AND status IN ({placeholders})"
+            " ORDER BY created_at LIMIT 1",
+            (user_id, clip_id, platform, *LIVE_PUBLISH_STATUSES),
+        ).fetchone()
+    return None if row is None else _publish_dict(row)
+
+
+def update_publish_job(publish_id: str, **fields: object) -> None:
+    """Update whitelisted publish columns; always bumps updated_at.
+
+    Progress bookkeeping only. `status` is refused here for the reason
+    update_job refuses it: a status write must name what it expects to replace.
+    """
+    if not fields:
+        return
+    if "status" in fields:
+        raise ValueError(
+            "update_publish_job: status is not updatable — move it with"
+            " transition_publish_status, which names the status it replaces"
+        )
+    unknown = set(fields) - _PUBLISH_UPDATABLE
+    if unknown:
+        raise ValueError(f"update_publish_job: unknown fields {sorted(unknown)!r}")
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    with contextlib.closing(_connect()) as conn:
+        conn.execute(
+            f"UPDATE publish_jobs SET {assignments}, updated_at = ? WHERE id = ?",
+            (*fields.values(), _now(), publish_id),
+        )
+
+
+def transition_publish_status(
+    publish_id: str,
+    *,
+    expect: str | tuple[str, ...],
+    to: str,
+    stale_before: str | None = None,
+    **fields: object,
+) -> bool:
+    """Atomically move a publish from `expect` to `to`. True = this call won.
+
+    The compare-and-swap `transition_status` is for jobs, and it exists for the
+    same race: a worker that has been declared stalled must not be able to write
+    `done` over the failure somebody already recorded, and a second delivery of
+    the same task must not upload twice.
+
+    `stale_before` is the sweep's extra precondition — "and nothing has touched
+    this row since" — so a task that is alive and writing progress is never
+    failed out from under itself.
+    """
+    expected = _expected(expect)
+    unknown = set(fields) - _PUBLISH_UPDATABLE
+    if unknown:
+        raise ValueError(f"transition_publish_status: unknown fields {sorted(unknown)!r}")
+    extra = "".join(f", {name} = ?" for name in fields)
+    placeholders = ", ".join("?" for _ in expected)
+    sql = (
+        f"UPDATE publish_jobs SET status = ?{extra}, updated_at = ?"
+        f" WHERE id = ? AND status IN ({placeholders})"
+    )
+    params: list[object] = [to, *fields.values(), _now(), publish_id, *expected]
+    if stale_before is not None:
+        sql += " AND updated_at < ?"
+        params.append(stale_before)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        return conn.execute(sql, params).rowcount == 1
+
+
+def reconcile_stalled_publishes(cutoff_iso: str) -> int:
+    """Fail publishes whose worker died mid-upload. Returns the count.
+
+    Without this a killed worker leaves a row reading `uploading` forever, and
+    the sheet watching it spins forever with it — the user is told their video
+    is on its way to a channel nothing is uploading to. The SELECT only
+    nominates; the compare-and-swap re-checks both halves of "stalled".
+    """
+    placeholders = ", ".join("?" for _ in LIVE_PUBLISH_STATUSES)
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        candidates = [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM publish_jobs WHERE status IN ({placeholders})"
+                " AND updated_at < ?",
+                (*LIVE_PUBLISH_STATUSES, cutoff_iso),
+            )
+        ]
+    return sum(
+        transition_publish_status(
+            publish_id,
+            expect=LIVE_PUBLISH_STATUSES,
+            to="failed",
+            stale_before=cutoff_iso,
+            error=_PUBLISH_INTERRUPTED_ERROR,
+            detail="Interrupted",
+        )
+        for publish_id in candidates
+    )
+
+
+def delete_publish_jobs_older_than(cutoff_iso: str) -> int:
+    """Reap terminal publish rows past the cutoff; returns the count.
+
+    Only `done` and `failed` — a row still queued or uploading is somebody's
+    live work, and the stall sweep above is what settles those. The clip and the
+    connection outlive this row: it is a receipt for one attempt, not a record
+    of what is on the channel.
+    """
+    with contextlib.closing(_connect()) as conn:
+        _ensure_schema(conn)
+        cur = conn.execute(
+            "DELETE FROM publish_jobs WHERE created_at < ?"
+            " AND status IN ('done', 'failed')",
+            (cutoff_iso,),
         )
         return cur.rowcount

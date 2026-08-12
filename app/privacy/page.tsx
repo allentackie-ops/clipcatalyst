@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import DocPage, {
   DocLink,
   Em,
+  ExtLink,
   List,
   MailLink,
   Note,
@@ -211,12 +212,12 @@ const SECTIONS: DocSection[] = [
             </>,
             <>
               your Google account id, if you have signed in with Google (see{" "}
-              <DocLink href="#google">section 07</DocLink>);
+              <DocLink href="#google">Sign in with Google</DocLink>);
             </>,
             <>
               your Stripe customer id, plan name, subscription status and the end
               of the current paid period (see{" "}
-              <DocLink href="#payments">section 05</DocLink>);
+              <DocLink href="#payments">Payments</DocLink>);
             </>,
             <>
               your brand kit: a caption colour, and the logo file itself if you
@@ -319,26 +320,66 @@ const SECTIONS: DocSection[] = [
   },
   {
     id: "connections",
-    title: "Connecting a social account",
+    title: "Connecting a YouTube channel",
     body: (
       <>
         <Note>
-          Today, nothing. There is no way to connect a YouTube, TikTok or
-          Instagram account to ClipCatalyst — no connect flow, no screen for it,
-          and no part of the product that can post on your behalf.
+          Nothing is connected unless you go through Google&apos;s own consent
+          screen and connect it yourself. A connection is used for the posts you
+          ask for, one clip at a time — nothing is ever posted automatically.
         </Note>
         <P>
-          The way to get a clip onto a platform right now is to download it, or
-          to use your device&apos;s own share sheet — which hands the file to the
-          app you pick, without us being involved.
+          <Em>What we ask Google for.</Em> Permission to upload videos to your
+          channel, and read-only access used for exactly one thing: reading the
+          channel&apos;s name, so the app can show you which account is
+          connected. Nothing else in your Google account is requested or
+          reachable.
         </P>
         <P>
-          When direct publishing does ship, the design on record is: access and
-          refresh tokens encrypted at rest, used only to upload the clips you
-          explicitly choose to post, revoked and deleted when you disconnect, and
-          never returned by any part of the API. This page will describe it in
-          the present tense — with what is actually stored — before the feature
-          is switched on.
+          <Em>What a connection stores.</Em> The platform, your channel&apos;s id
+          and display name, the permissions Google granted, when the access token
+          expires, and the access and refresh tokens themselves —{" "}
+          <Em>encrypted at rest</Em>, with a key the database does not contain.
+          No part of our API returns a token in any response, ever.
+        </P>
+        <P>
+          <Em>What it is used for.</Em> Uploading the clips you choose to post,
+          and naming the connected channel in the app. It is not used for
+          advertising, not sold or shared, and not used to train anything.
+        </P>
+        <P>
+          <Em>Disconnecting.</Em> Disconnecting revokes the grant with Google
+          and then deletes the stored connection — in that order, because those
+          stored tokens are the only thing that can revoke it. You can also
+          revoke it yourself at any time from{" "}
+          <ExtLink href="https://myaccount.google.com/permissions">
+            your Google account permissions
+          </ExtLink>
+          .
+        </P>
+        <P>
+          ClipCatalyst&apos;s use of information received from Google APIs
+          follows the{" "}
+          <ExtLink href="https://developers.google.com/terms/api-services-user-data-policy">
+            Google API Services User Data Policy
+          </ExtLink>
+          , including its Limited Use requirements. Connecting a channel also
+          means using YouTube API Services, which are covered by the{" "}
+          <ExtLink href="https://www.youtube.com/t/terms">
+            YouTube Terms of Service
+          </ExtLink>{" "}
+          and the{" "}
+          <ExtLink href="https://policies.google.com/privacy">
+            Google Privacy Policy
+          </ExtLink>
+          .
+        </P>
+        <P>
+          <Em>TikTok and Instagram cannot be connected.</Em> Both are waiting on
+          platform review, and the product says so rather than offering a button
+          that cannot finish a post. Until they land, the way to get a clip onto
+          those apps is to download it or use your device&apos;s own share sheet,
+          which hands the file to the app you pick without us being involved.
         </P>
       </>
     ),
@@ -419,8 +460,8 @@ const SECTIONS: DocSection[] = [
               account details are not sold, rented, or handed to anybody for
               their own purposes. The only third parties involved at all are the
               ones named above — Stripe for payment, Resend for the sign-in
-              email, Google if you choose to sign in with it, and the model host
-              your browser downloads weights from.
+              email, Google if you choose to sign in with it or connect a
+              channel, and the model host your browser downloads weights from.
             </>,
           ]}
         />

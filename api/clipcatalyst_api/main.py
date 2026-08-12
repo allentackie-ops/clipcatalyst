@@ -23,7 +23,7 @@ from pydantic import ValidationError
 # misses every part of a hand-parsed form (and quietly cleared the logo).
 from starlette.datastructures import UploadFile
 
-from . import auth, billing, brandkit, db, googleid, mailer
+from . import auth, billing, brandkit, connections, db, googleid, mailer, publish
 from .models import (
     AuthResponse,
     AuthUserOut,
@@ -38,6 +38,10 @@ from .models import (
     ClipSummaryOut,
     ClipUploadRequest,
     ClipWordOut,
+    ConnectionDeletedResponse,
+    ConnectionListResponse,
+    ConnectionOut,
+    ConnectionStartResponse,
     CreateJobRequest,
     CreateJobResponse,
     EmailCodeStartRequest,
@@ -50,7 +54,10 @@ from .models import (
     LoginRequest,
     LogoutResponse,
     MeResponse,
+    PlatformOut,
     PortalResponse,
+    PublishClipRequest,
+    PublishJobOut,
     QuotaOut,
     RegisterRequest,
     StartJobResponse,
@@ -61,7 +68,7 @@ from .models import (
 from .plans import PLANS, effective_plan
 from .settings import Settings, get_settings
 from .storage import clip_media_type, get_storage
-from .worker import process_job, reconcile_stalled
+from .worker import process_job, publish_clip, reconcile_stalled
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +180,54 @@ _CLIP_METADATA_MAX_BYTES = 256_000
 # itself, so a clip exactly at the limit is not refused by its own boundary.
 _CLIP_BODY_SLACK_BYTES = 1_000_000
 _CLIP_UPLOAD_CHUNK = 1 << 20  # 1 MiB
+
+# --- connected publishing accounts (PUBLISH.md Part 2) ---------------------- #
+
+# 503, exactly like Google sign-in with no client id and billing with no
+# gateway: a deployment state. It names the variable and says what the refusal
+# buys, because the tempting "fix" — store the token and encrypt it later — is
+# the one outcome this refusal exists to prevent.
+_CONNECTIONS_OFF = (
+    "Connecting a channel isn't enabled on this server: CC_TOKEN_KEY is unset "
+    "or isn't a valid Fernet key, and a channel's tokens are never stored "
+    "unencrypted."
+)
+_CONNECT_NO_PUBLIC_URL = (
+    "This server has no public address configured (CC_PUBLIC_BASE_URL), so a "
+    "platform has nowhere to send you back to after you approve."
+)
+_CONNECT_UNKNOWN_PLATFORM = "ClipCatalyst doesn't publish to that platform."
+_CONNECTION_UNKNOWN = "Unknown connection."
+# The callback could not be tied to an authorization THIS server started: an
+# unsigned or tampered state, one that was already spent, one past its ten
+# minutes, or one whose session has since ended. All four are the same answer,
+# and it is deliberately not a redirect — see the route.
+_CONNECT_STATE_INVALID = (
+    "That connection link is no longer valid — it may have expired or already "
+    "been used. Start again from your account page."
+)
+_CONNECT_REVOKE_FAILED = (
+    "We couldn't reach the platform to revoke access just now, so nothing was "
+    "removed — please try again in a moment."
+)
+# The short codes `/account?connect_error=…` carries. The frontend renders the
+# sentence; the server picks which one, because it is the only side that knows
+# what happened.
+_CONNECT_ERROR_DENIED = "denied"  # the user said no at the consent screen
+_CONNECT_ERROR_REFUSED = "refused"  # the provider rejected the exchange
+_CONNECT_ERROR_UNAVAILABLE = "unavailable"  # we could not reach the provider
+_CONNECT_ERROR_NO_ACCOUNT = "no_account"  # authorized, but nothing to post to
+
+# --- posting a clip (PUBLISH.md Part 3) ------------------------------------- #
+
+_PUBLISH_UNKNOWN = "Unknown post."
+# The queue took the request but the broker never did, so nothing will ever
+# run it. Recorded on the row AND returned, because a job left reading `queued`
+# with nobody working on it is the one status a poller cannot interpret.
+_PUBLISH_NOT_QUEUED = (
+    "We couldn't start this upload just now — please try posting the clip "
+    "again in a moment."
+)
 
 
 def _sniff_clip_type(head: bytes) -> str | None:
@@ -654,6 +709,124 @@ def _clip_file_response(settings: Settings, clip: dict) -> Response:
     raise HTTPException(status_code=404, detail=_CLIP_EXPIRED)
 
 
+# --------------------------------------------------------------------------- #
+# Connected publishing accounts (PUBLISH.md Part 2). Nothing in this section
+# ever reads a token: the routes move ciphertext between the database and
+# connections.py, and the response models have no field one could go in.
+# --------------------------------------------------------------------------- #
+
+
+def _provider(platform: str) -> connections.Provider:
+    """The provider a path segment names, or 404."""
+    provider = connections.provider_for(platform)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=_CONNECT_UNKNOWN_PLATFORM)
+    return provider
+
+
+def _connect_blocker(settings: Settings, provider: connections.Provider) -> str:
+    """Why this platform cannot be connected right now, or '' when it can.
+
+    Every reason is a fact about the SERVER or about the platform's review
+    status — never about the caller — which is what lets the same function
+    answer the account page's "should this button exist?" and the start
+    route's "may this proceed?". One source, so a button can never appear for
+    a flow that would 503.
+    """
+    if not provider.connectable:
+        return provider.reason
+    if not connections.is_configured(settings):
+        return _CONNECTIONS_OFF
+    client_id, client_secret = connections.credentials(settings, provider.platform)
+    if not client_id or not client_secret:
+        name = provider.platform.upper()
+        return (
+            f"{provider.label} publishing isn't configured on this server yet "
+            f"(CC_{name}_CLIENT_ID and CC_{name}_CLIENT_SECRET are unset)."
+        )
+    if not connections.redirect_uri(settings, provider.platform):
+        return _CONNECT_NO_PUBLIC_URL
+    return ""
+
+
+def _connection_out(connection: dict) -> ConnectionOut:
+    """A stored connection as the client sees it — which is to say, no tokens.
+
+    Built field by field rather than by spreading the row: a `**connection`
+    here would put `access_token_enc` into anything that later gained a
+    matching field, and "the response model has nowhere to put it" is the
+    guarantee, not a comment.
+    """
+    return ConnectionOut(
+        id=str(connection["id"]),
+        platform=str(connection["platform"]),
+        account_name=str(connection.get("account_name") or ""),
+        account_id=str(connection.get("account_id") or ""),
+        scopes=str(connection.get("scopes") or "").split(),
+        created_at=str(connection.get("created_at") or ""),
+        updated_at=str(connection.get("updated_at") or ""),
+    )
+
+
+def _platform_out(settings: Settings, provider: connections.Provider) -> PlatformOut:
+    """One platform's catalogue entry: can it be connected, can it be posted to.
+
+    The two are separate questions and both are answered from the SERVER. The
+    posting half comes from the adapter's capability rather than from anything
+    stored: what a post can do (and the sentence saying so) changes with a
+    deployment, not with a row, so the client is told rather than remembering.
+    """
+    blocker = _connect_blocker(settings, provider)
+    capability = publish.capability_for(settings, provider.platform)
+    return PlatformOut(
+        platform=provider.platform,
+        label=provider.label,
+        connectable=not blocker,
+        reason=blocker,
+        # The capability's note when there is an adapter (it knows what a post
+        # will actually do today); the provider's standing caveat otherwise.
+        note=capability.note if capability is not None else provider.note,
+        publishable=capability is not None,
+        privacy_choices=list(capability.privacy_choices) if capability else [],
+        forced_privacy=capability.forced if capability else "",
+    )
+
+
+def _publish_out(settings: Settings, row: dict) -> PublishJobOut:
+    """One publish row as the sheet sees it. Built field by field, as ever."""
+    capability = publish.capability_for(settings, str(row["platform"]))
+    return PublishJobOut(
+        id=str(row["id"]),
+        clip_id=str(row["clip_id"]),
+        platform=str(row["platform"]),
+        status=str(row["status"]),
+        progress=float(row["progress"] or 0.0),
+        detail=str(row["detail"] or ""),
+        error=row["error"],
+        title=str(row["title"] or ""),
+        privacy=str(row["privacy"] or ""),
+        video_id=str(row["video_id"] or "") or None,
+        video_url=str(row["video_url"] or "") or None,
+        note=capability.note if capability is not None else "",
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _account_redirect(settings: Settings, query: str) -> RedirectResponse:
+    """Send the browser back to the account page with one query parameter.
+
+    303, not 307: the browser must GET the account page, and this is the end of
+    a flow that must not be repeatable by a refresh. `no-store` because the URL
+    it is leaving carried a one-time authorization code.
+    """
+    return RedirectResponse(
+        f"{settings.frontend_origin}/account?{query}",
+        status_code=303,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -665,6 +838,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     reconcile_stalled()
     # Expired sessions are dead weight — clear them on every boot.
     db.purge_expired_sessions()
+    # So are half-finished authorizations nobody came back for. They already
+    # stopped working at their TTL (db.consume_oauth_state checks it) — this
+    # only keeps the table from collecting them.
+    db.purge_expired_oauth_states()
     yield
 
 
@@ -1269,6 +1446,370 @@ def _build_router():  # noqa: ANN202 - APIRouter
     ) -> Response:
         """The saved video itself — owner only, 404 once it has expired."""
         return _clip_file_response(get_settings(), _owned_clip(clip_id, user))
+
+    # --------------------------------------------------------------------- #
+    # Posting a clip to a connected channel (PUBLISH.md Part 3).
+    #
+    # The route's whole job is to refuse honestly and then queue. Every reason
+    # a post cannot happen is checked HERE, before a row exists, so a job that
+    # reaches the worker is one whose preconditions were all true a moment ago
+    # — and the worker re-checks the two that can change under it (the clip's
+    # file and the connection) rather than assuming they held.
+    # --------------------------------------------------------------------- #
+
+    @router.post(
+        "/clips/{clip_id}/publish", response_model=PublishJobOut, status_code=202
+    )
+    def publish_library_clip(
+        clip_id: str,
+        body: PublishClipRequest,
+        request: Request,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> PublishJobOut:
+        """Queue an upload of one library clip to a connected channel.
+
+        Refusals, in the order they are checked and each with its own status:
+
+        * somebody else's clip, or one that never existed — 404, the same
+          answer `GET /v1/clips/{id}` gives, because which of the two it was is
+          not a stranger's business;
+        * a platform this product does not know — 404;
+        * a platform it knows but cannot post to yet (TikTok, Instagram) — 503
+          with the reason, never a dead 202;
+        * a clip whose video has expired — 409 and PUBLISH.md's sentence. The
+          row is still there, which is why this is not a 404 and why the
+          message says what survived;
+        * no channel connected — 409, pointing at the account page.
+
+        A second request while one is already in flight is NOT an error: it
+        returns the job that is already running, with a 200 instead of a 202.
+        A double-tapped Post button is a double-tapped button, and answering it
+        with a second upload would spend two of a day's handful of uploads on
+        one video (db.create_publish_job holds that line atomically).
+        """
+        _no_store(response)
+        # Its own window: each call spends a slot of a very small daily upload
+        # quota at the provider, which is a scarcer resource than our own CPU.
+        _rate_limit(request, "publish")
+        settings = get_settings()
+        clip = _owned_clip(clip_id, user)
+        provider = _provider(body.platform)
+        target = publish.target_for(provider.platform)
+        if target is None:
+            # Known platform, no adapter — the TikTok/Instagram state. 503 for
+            # the same reason connecting them does: it is a fact about this
+            # build, not about the request.
+            raise HTTPException(
+                status_code=503, detail=publish.unsupported(provider.label)
+            )
+        if not connections.is_configured(settings):
+            # No key, so the stored tokens cannot be read to upload with.
+            raise HTTPException(status_code=503, detail=_CONNECTIONS_OFF)
+        if not str(clip.get("file_path") or ""):
+            raise HTTPException(status_code=409, detail=publish.CLIP_EXPIRED)
+        connection = db.get_platform_connection(str(user["id"]), provider.platform)
+        if connection is None:
+            raise HTTPException(
+                status_code=409, detail=publish.not_connected(provider.label)
+            )
+
+        capability = target.capability(settings)
+        publish_id = uuid.uuid4().hex
+        row = db.create_publish_job(
+            publish_id,
+            user_id=str(user["id"]),
+            clip_id=str(clip["id"]),
+            connection_id=str(connection["id"]),
+            platform=provider.platform,
+            title=body.title.strip(),
+            description=body.description.strip(),
+            # Resolved here so the ROW records what will really happen, not
+            # what was asked for. The worker resolves it again at upload time
+            # against the capability as it stands then.
+            privacy=capability.resolve(body.privacy),
+        )
+        if row is None:
+            live = db.live_publish_job(
+                str(user["id"]), str(clip["id"]), provider.platform
+            )
+            if live is not None:
+                response.status_code = 200
+                return _publish_out(settings, live)
+            # It finished between the refusal and the lookup. Nothing is in
+            # flight any more, so the honest answer is to let them ask again.
+            raise HTTPException(
+                status_code=409,
+                detail="That clip was just posted — refresh and try again.",
+            )
+
+        try:
+            # Eager mode (CC_QUEUE=eager) runs the whole upload inline.
+            publish_clip.delay(publish_id)
+        except Exception:
+            # The task never reached the broker, so nothing will ever move this
+            # row off `queued`. Fail it here rather than leaving a job that
+            # polls forever with nobody working on it.
+            logger.exception("publish %s could not be queued", publish_id)
+            db.transition_publish_status(
+                publish_id,
+                expect="queued",
+                to="failed",
+                error=_PUBLISH_NOT_QUEUED,
+                detail="Failed",
+            )
+            raise HTTPException(status_code=503, detail=_PUBLISH_NOT_QUEUED) from None
+        # Re-read: in eager mode the upload has already finished by now, and
+        # handing back the pre-dispatch row would tell the client `queued`
+        # about a job that is done.
+        return _publish_out(settings, db.get_publish_job(publish_id) or row)
+
+    @router.get("/publishes/{publish_id}", response_model=PublishJobOut)
+    def get_publish(
+        publish_id: str,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> PublishJobOut:
+        """Poll one publish. Somebody else's is a 404, like every owned thing."""
+        _no_store(response)
+        row = db.get_publish_job(publish_id)
+        if row is None or str(row["user_id"]) != str(user["id"]):
+            raise HTTPException(status_code=404, detail=_PUBLISH_UNKNOWN)
+        return _publish_out(get_settings(), row)
+
+    # --------------------------------------------------------------------- #
+    # Connected publishing accounts (PUBLISH.md Part 2).
+    #
+    # Two of these three routes are session-gated in the ordinary way. The
+    # callback CANNOT be: it arrives as a top-level browser navigation from the
+    # provider, with no Authorization header and no cookie this product has
+    # ever set. Everything that would otherwise come from a session therefore
+    # comes from the state row instead — whose account, which platform, which
+    # redirect URI, which PKCE verifier — and the row is spent as it is read.
+    # --------------------------------------------------------------------- #
+
+    @router.get("/connections", response_model=ConnectionListResponse)
+    def list_connections(
+        response: Response, user: dict = Depends(auth.require_session)
+    ) -> ConnectionListResponse:
+        """This account's connected channels, and what every platform can do.
+
+        `platforms` is sent whether or not anything is connected: PUBLISH.md's
+        UI rule is that a platform which cannot complete a post must say so
+        rather than offer a dead button, and whether it can is a server fact
+        (a token key, a client id, a public URL, a review that has landed).
+        """
+        _no_store(response)
+        settings = get_settings()
+        return ConnectionListResponse(
+            connections=[
+                _connection_out(row) for row in db.list_connections(str(user["id"]))
+            ],
+            platforms=[
+                _platform_out(settings, provider)
+                for provider in connections.PROVIDERS.values()
+            ],
+        )
+
+    @router.post(
+        "/connections/{platform}/start", response_model=ConnectionStartResponse
+    )
+    def start_connection(
+        platform: str,
+        request: Request,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+        authorization: str | None = Header(default=None, alias="Authorization"),
+    ) -> ConnectionStartResponse:
+        """Begin an authorization: stage the state and PKCE, hand back a URL.
+
+        The order below is the "nothing is stored" half of PUBLISH.md's
+        no-key rule: every refusal happens BEFORE ``put_oauth_state``, so a box
+        without a usable ``CC_TOKEN_KEY`` answers 503 with an empty
+        ``oauth_states`` table — not with a staged flow whose verifier it had
+        nowhere safe to put.
+        """
+        _no_store(response)
+        # Each call mints a state row and a PKCE verifier, so it gets the same
+        # per-client window the credential routes get.
+        _rate_limit(request, "connect")
+        settings = get_settings()
+        provider = _provider(platform)
+        blocker = _connect_blocker(settings, provider)
+        if blocker:
+            raise HTTPException(status_code=503, detail=blocker)
+
+        raw_session = auth.bearer_session_token(authorization)
+        assert raw_session is not None  # require_session guarantees a bearer
+        redirect = connections.redirect_uri(settings, provider.platform)
+        verifier = connections.new_verifier()
+        state, state_hash = connections.new_state(settings, provider.platform)
+        db.put_oauth_state(
+            state_hash,
+            user_id=str(user["id"]),
+            # THE session binding. The callback cannot present a credential, so
+            # the account a connection lands on is this one, decided here, and
+            # the flow dies with the session that started it.
+            session_hash=auth.hash_session_token(raw_session),
+            platform=provider.platform,
+            verifier_enc=connections.encrypt(settings, verifier),
+            # Stored rather than recomputed at the callback: the provider
+            # checks that both halves of the flow named the same URI, and a
+            # CC_PUBLIC_BASE_URL edited in between must fail that check.
+            redirect_uri=redirect,
+            expires_at=connections.state_expires_at(),
+        )
+        return ConnectionStartResponse(
+            authorize_url=connections.authorize_url(
+                settings,
+                provider,
+                state=state,
+                verifier=verifier,
+                redirect=redirect,
+            )
+        )
+
+    @router.get("/connections/{platform}/callback")
+    def connection_callback(
+        platform: str,
+        request: Request,
+        code: str = Query(default="", max_length=2048),
+        state: str = Query(default="", max_length=connections.MAX_STATE_LENGTH),
+        error: str = Query(default="", max_length=200),
+    ) -> Response:
+        """The provider's redirect target: exchange, store, back to /account.
+
+        No session dependency, by necessity — and the whole first half of this
+        route is what replaces one. Until the state validates and is spent, we
+        do not know that this request belongs to any flow of ours, so it is
+        refused with a 400 rather than redirected: sending an unknown browser
+        to the account page as though it had just tried to connect something
+        would be inventing a story about a request we cannot account for. Once
+        the state IS ours, every later failure redirects with a reason,
+        because by then we know whose flow it was.
+        """
+        _rate_limit(request, "connect-callback")
+        settings = get_settings()
+        provider = _provider(platform)
+        if not connections.is_configured(settings):
+            # Without the key the staged verifier cannot be read, so there is
+            # no flow to finish. Same 503 the start route gives.
+            raise HTTPException(status_code=503, detail=_CONNECTIONS_OFF)
+
+        # 1. Is this a state we signed, for THIS platform? Arithmetic, before
+        #    any database work — a forged value never becomes a lookup.
+        nonce = connections.state_nonce(settings, provider.platform, state)
+        if not nonce:
+            raise HTTPException(status_code=400, detail=_CONNECT_STATE_INVALID)
+        # 2. Is it still unspent and unexpired? The read IS the spend, so a
+        #    replay — the CSRF attempt this exists for — finds nothing, even
+        #    when it arrives in the same millisecond as the first.
+        staged = db.consume_oauth_state(connections.hash_state(nonce))
+        if staged is None:
+            raise HTTPException(status_code=400, detail=_CONNECT_STATE_INVALID)
+        # 3. Is the session that started it still alive, and still that
+        #    account's? A signed-out session cannot finish connecting a channel
+        #    to the account it has left.
+        owner = db.get_session_user(str(staged["session_hash"]))
+        if owner is None or str(owner["id"]) != str(staged["user_id"]):
+            logger.info(
+                "connect callback for %s abandoned: the session that started it "
+                "is gone",
+                provider.platform,
+            )
+            raise HTTPException(status_code=400, detail=_CONNECT_STATE_INVALID)
+
+        # From here the flow is ours: the user goes back to their account page
+        # whatever happens, with a reason attached.
+        if error or not code:
+            # `access_denied` is somebody clicking Cancel — not a fault.
+            logger.info(
+                "connect callback for %s carried no code (error=%r)",
+                provider.platform,
+                error,
+            )
+            reason = (
+                _CONNECT_ERROR_DENIED
+                if error == "access_denied" or not error
+                else _CONNECT_ERROR_REFUSED
+            )
+            return _account_redirect(settings, f"connect_error={reason}")
+        try:
+            verifier = connections.decrypt(settings, str(staged["verifier_enc"]))
+        except connections.TokenUnreadable:
+            # The verifier this flow was started with is unreadable, so PKCE
+            # cannot be satisfied. Exchanging without it is not the fallback —
+            # there is no fallback, that is what "required" means.
+            logger.warning(
+                "connect callback for %s: the staged PKCE verifier could not be "
+                "decrypted — refusing the exchange",
+                provider.platform,
+            )
+            raise HTTPException(
+                status_code=400, detail=_CONNECT_STATE_INVALID
+            ) from None
+
+        try:
+            connections.complete(
+                settings,
+                provider,
+                user_id=str(staged["user_id"]),
+                code=code,
+                verifier=verifier,
+                redirect=str(staged["redirect_uri"]),
+            )
+        except connections.AccountMissing as failure:
+            logger.info("connect %s: nothing to publish to — %s", platform, failure)
+            return _account_redirect(
+                settings, f"connect_error={_CONNECT_ERROR_NO_ACCOUNT}"
+            )
+        except connections.ProviderRefused as failure:
+            logger.warning("connect %s refused: %s", platform, failure)
+            return _account_redirect(
+                settings, f"connect_error={_CONNECT_ERROR_REFUSED}"
+            )
+        except connections.ProviderUnavailable as failure:
+            logger.warning("connect %s unavailable: %s", platform, failure)
+            return _account_redirect(
+                settings, f"connect_error={_CONNECT_ERROR_UNAVAILABLE}"
+            )
+        except connections.TokenKeyUnavailable:
+            # The key went away between the check above and the write — an env
+            # edited under a running process. The tokens we just received are
+            # dropped unstored, which is the only acceptable outcome.
+            logger.error("connect %s: CC_TOKEN_KEY became unusable mid-flow", platform)
+            raise HTTPException(status_code=503, detail=_CONNECTIONS_OFF) from None
+        return _account_redirect(settings, f"connected={provider.platform}")
+
+    @router.delete(
+        "/connections/{connection_id}", response_model=ConnectionDeletedResponse
+    )
+    def delete_connection(
+        connection_id: str,
+        response: Response,
+        user: dict = Depends(auth.require_session),
+    ) -> ConnectionDeletedResponse:
+        """Disconnect a channel: revoke with the provider, THEN delete the row.
+
+        Somebody else's connection is a 404, like every other owned resource
+        here. A provider we could not reach is a 502 with the row intact — the
+        stored tokens are the only thing that can ever revoke that grant, so
+        they are not thrown away on a failed attempt (the same shape
+        ``DELETE /v1/clips/{id}`` uses for a file it could not unlink).
+        """
+        _no_store(response)
+        settings = get_settings()
+        connection = db.get_connection(connection_id)
+        if connection is None or str(connection["user_id"]) != str(user["id"]):
+            raise HTTPException(status_code=404, detail=_CONNECTION_UNKNOWN)
+        try:
+            connections.disconnect(settings, connection)
+        except connections.ProviderUnavailable as failure:
+            logger.warning("disconnect %s failed: %s", connection_id, failure)
+            raise HTTPException(
+                status_code=502, detail=_CONNECT_REVOKE_FAILED
+            ) from None
+        return ConnectionDeletedResponse()
 
     def _require_gateway() -> billing.Gateway:
         """The configured billing gateway, or an honest 503.

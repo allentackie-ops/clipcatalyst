@@ -105,6 +105,14 @@ class Settings:
     # they are separate powers.
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
+    # Has Google finished reviewing this app's `youtube.upload` scope?
+    # "off" (the default, and the honest one until the review actually lands)
+    # means every upload is forced to `private` — which is not a policy we
+    # chose, it is what Google enforces on an unverified sensitive scope, so
+    # offering somebody a "public" switch would be offering them a lie. Flipped
+    # to "on" the day verification comes through, and the account page and the
+    # post sheet both change with it (publish/youtube.py: capability).
+    youtube_verified: str = "off"  # "on" | "off"
 
     @property
     def uploads_dir(self) -> Path:
@@ -285,4 +293,5 @@ def get_settings() -> Settings:
         token_key=os.environ.get("CC_TOKEN_KEY", "").strip(),
         youtube_client_id=os.environ.get("CC_YOUTUBE_CLIENT_ID", "").strip(),
         youtube_client_secret=os.environ.get("CC_YOUTUBE_CLIENT_SECRET", "").strip(),
+        youtube_verified=os.environ.get("CC_YOUTUBE_VERIFIED", "off").strip().lower(),
     )

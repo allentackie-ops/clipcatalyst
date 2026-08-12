@@ -19,7 +19,7 @@ from pathlib import Path
 
 from celery.exceptions import SoftTimeLimitExceeded, Terminated
 
-from . import db
+from . import connections, db, publish
 from .brandkit import logo_abs_path, normalize_hex
 from .pipeline.croptrack import CropTrack, CropTrackOptions, build_crop_track
 from .pipeline.diarize import assign_speakers, build_speech_segments
@@ -39,7 +39,7 @@ from .pipeline.types import (
 from .plans import PLANS, Plan, effective_plan
 from .queue_app import celery_app
 from .settings import Settings, get_settings
-from .storage import Storage, get_storage
+from .storage import Storage, clip_media_type, get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -782,6 +782,227 @@ def _clip_out(plan: ClipPlan, index: int, url: str, width: int, height: int) -> 
     }
 
 
+# --------------------------------------------------------------------------- #
+# Posting a clip to a connected channel (PUBLISH.md Part 3).
+#
+# The same shape as process_job, one size down: claim the row, do the work,
+# write a terminal status you are still entitled to write. It shares the queue
+# (an upload is minutes of network, not seconds) and shares nothing else — a
+# publish renders nothing, reserves no quota, and touches no job row.
+#
+# Nothing below names a platform. The adapter is looked up from the row and
+# spoken to through `PublishTarget`, which is what makes TikTok and Instagram a
+# new module rather than a new branch in here.
+# --------------------------------------------------------------------------- #
+
+_PUBLISH_GENERIC_ERROR = (
+    "Something went wrong while posting this clip. Please try again — if it "
+    "keeps failing, disconnect and reconnect the channel."
+)
+_PUBLISH_TIMEOUT_ERROR = (
+    "This upload took too long and was stopped. Please try posting the clip "
+    "again."
+)
+
+
+@celery_app.task(bind=True, name="clipcatalyst.publish_clip")
+def publish_clip(self, publish_id: str) -> None:
+    settings = get_settings()
+    try:
+        _publish_run(publish_id, settings)
+    except _LostClaim:
+        # Ordered first, exactly as in process_job: a run that no longer owns
+        # the row may not write a terminal status over whatever does own it.
+        logger.warning(
+            "publish %s: the row moved out from under this run; stopping", publish_id
+        )
+    except SoftTimeLimitExceeded:
+        logger.warning("publish %s exceeded the soft time limit", publish_id)
+        _fail_publish(publish_id, _PUBLISH_TIMEOUT_ERROR)
+        raise
+    except publish.PublishError as exc:
+        # Written to be read by the person who pressed Post.
+        logger.warning("publish %s failed: %s", publish_id, exc)
+        _fail_publish(publish_id, str(exc))
+    except Exception:
+        logger.exception("publish %s crashed unexpectedly", publish_id)
+        _fail_publish(publish_id, _PUBLISH_GENERIC_ERROR)
+
+
+def _fail_publish(publish_id: str, message: str) -> None:
+    """Record a terminal failure, if this run is still the one entitled to.
+
+    Guarded on LIVE_PUBLISH_STATUSES, so a failure path arriving after the stall
+    sweep already failed the row (or after it somehow finished) is a no-op
+    rather than an overwrite — the same rule `_fail` follows for jobs.
+    """
+    try:
+        if not db.transition_publish_status(
+            publish_id,
+            expect=db.LIVE_PUBLISH_STATUSES,
+            to="failed",
+            error=message,
+            detail="Failed",
+        ):
+            logger.warning(
+                "publish %s: already terminal; leaving its status alone", publish_id
+            )
+    except Exception:
+        logger.exception("publish %s: could not record failed status", publish_id)
+
+
+def _publish_run(publish_id: str, settings: Settings) -> None:
+    """One publish, start to finish.
+
+    Everything is re-read HERE rather than trusted from the row: the clip's file
+    may have expired since the request, the connection may have been
+    disconnected, and the platform's capability may have changed with a
+    deployment. A queued publish is a request to post *now*, under the rules
+    that hold now.
+    """
+    db.init_db()
+    row = db.get_publish_job(publish_id)
+    if row is None:
+        raise _LostClaim(publish_id)
+
+    # The claim. queued → uploading, and a run that loses it does nothing at
+    # all: a second delivery of the same task must not upload the video twice.
+    if not db.transition_publish_status(
+        publish_id,
+        expect="queued",
+        to="uploading",
+        progress=0.0,
+        detail="Preparing the upload",
+        error=None,
+    ):
+        raise _LostClaim(publish_id)
+
+    target = publish.target_for(str(row["platform"]))
+    if target is None:
+        raise publish.PublishError(publish.unsupported(str(row["platform"])))
+
+    connection = db.get_connection(str(row["connection_id"]))
+    if connection is None or str(connection["user_id"]) != str(row["user_id"]):
+        raise publish.PublishError(publish.CONNECTION_GONE)
+
+    clip = db.get_clip(str(row["clip_id"]))
+    if clip is None or str(clip["user_id"]) != str(row["user_id"]):
+        raise publish.PublishError(publish.CLIP_UNKNOWN)
+    file_path = str(clip.get("file_path") or "")
+    if not file_path:
+        # PUBLISH.md: an expired clip is REFUSED with a clear message rather
+        # than turning into a 500 somewhere further down.
+        raise publish.PublishError(publish.CLIP_EXPIRED)
+
+    settings.ensure_dirs()
+    storage = get_storage(settings)
+    # The stored name's own extension, because a clip saved from the browser
+    # engine may be WebM rather than MP4 — and what it IS decides what the
+    # upload is allowed to say it is.
+    media_type = clip_media_type(file_path) or "video/mp4"
+    suffix = Path(file_path).suffix or ".mp4"
+    dest = settings.tmp_dir / f"publish-{publish_id}{suffix}"
+    local = storage.fetch_library_clip(file_path, dest)
+    if local is None or not Path(local).is_file():
+        # The row says there is a file and the storage backend disagrees: the
+        # retention sweep landed between the request and this moment, or the
+        # object is gone. Same event as an expired clip, so the same sentence.
+        raise publish.PublishError(publish.CLIP_EXPIRED)
+    # A copy this run made (S3) rather than the library's own file (local
+    # disk). Only the copy is ours to delete, and it is deleted on EVERY exit —
+    # a failed upload leaves a whole video behind otherwise, in a tmp directory
+    # nothing else sweeps.
+    staged = Path(local) if Path(local) == dest else None
+    try:
+        request = publish.PublishRequest(
+            clip=clip,
+            file=Path(local),
+            size_bytes=Path(local).stat().st_size,
+            title=str(row["title"] or ""),
+            description=str(row["description"] or ""),
+            media_type=media_type,
+            # Re-resolved against the CURRENT capability, never taken from the
+            # row as gospel: a box whose app is still unverified must force
+            # `private` even on a publish queued while somebody was mid-deploy.
+            privacy=target.capability(settings).resolve(str(row["privacy"] or "")),
+        )
+
+        throttle = _Throttle()
+
+        def on_progress(fraction: float, detail: str) -> None:
+            if throttle.ready():
+                db.update_publish_job(
+                    publish_id,
+                    progress=round(min(1.0, max(0.0, fraction)), 4),
+                    detail=detail,
+                )
+
+        result = target.publish(settings, connection, request, on_progress)
+    finally:
+        if staged is not None:
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("publish %s: could not remove %s", publish_id, staged)
+
+    if not db.transition_publish_status(
+        publish_id,
+        expect="uploading",
+        to="done",
+        progress=1.0,
+        detail=f"Posted to {_platform_label(str(row['platform']))}",
+        error=None,
+        video_id=result.video_id,
+        video_url=result.url,
+    ):
+        # The stall sweep failed this row while the upload was in flight. The
+        # video IS on the channel, so the log is the only place left to say so —
+        # and this run must not write `done` over a terminal status it lost.
+        logger.warning(
+            "publish %s finished as %s but its row is no longer ours",
+            publish_id,
+            result.video_id,
+        )
+        raise _LostClaim(publish_id)
+
+
+def _platform_label(platform: str) -> str:
+    """A platform's display name for a progress line ('YouTube', not 'Youtube')."""
+    provider = connections.provider_for(platform)
+    return provider.label if provider is not None else platform
+
+
+def reconcile_stalled_publishes() -> int:
+    """Fail publishes whose worker died mid-upload. Returns the count.
+
+    The same cutoff as the render reconciler for the same reason: a row nobody
+    is working on must not read `uploading` forever, because the sheet watching
+    it would spin forever with it.
+    """
+    settings = get_settings()
+    db.init_db()
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=settings.render_timeout_s + STALL_SLACK_SECONDS
+    )
+    return db.reconcile_stalled_publishes(cutoff.isoformat(timespec="milliseconds"))
+
+
+def reap_expired_publishes() -> int:
+    """Delete finished publish rows past the job TTL; returns the count.
+
+    A publish row is a receipt for one attempt, not a record of what is on
+    somebody's channel — the video lives on YouTube and the clip lives in the
+    library, and neither is touched here. Only terminal rows are reaped, so a
+    live upload can never be swept out from under itself.
+    """
+    settings = get_settings()
+    db.init_db()
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=settings.job_ttl_hours)
+    ).isoformat(timespec="milliseconds")
+    return db.delete_publish_jobs_older_than(cutoff)
+
+
 def reconcile_stalled() -> int:
     """Fail — and refund — jobs whose worker died mid-run. Returns the count.
 
@@ -903,6 +1124,18 @@ def purge_expired_login_codes() -> int:
     return db.purge_expired_login_codes(now)
 
 
+def purge_expired_oauth_states() -> int:
+    """Delete abandoned authorizations; returns the count (PUBLISH.md Part 2).
+
+    The same kind of tidy-up: a state past its ten minutes is already refused
+    by db.consume_oauth_state, so this only clears the flows people started and
+    never finished at the provider's consent screen.
+    """
+    db.init_db()
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return db.purge_expired_oauth_states(now)
+
+
 @celery_app.task(name="clipcatalyst.reap_expired")
 def reap_expired_task() -> int:
     """Celery entry point for the hourly maintenance sweep (run by beat).
@@ -918,14 +1151,24 @@ def reap_expired_task() -> int:
     both directions: it never touches a job, and the job reaper never touches
     a library file.
 
-    Expired sign-in codes are swept here too (EMAILAUTH.md). Hygiene only:
-    they already stopped working the moment their TTL passed, because
-    db.get_login_code will not return an expired row — this is what keeps dead
-    secrets from accumulating in the table, not what makes them dead.
+    Expired sign-in codes are swept here too (EMAILAUTH.md), and abandoned
+    OAuth authorizations with them (PUBLISH.md Part 2). Hygiene only: both
+    already stopped working the moment their TTL passed, because neither
+    db.get_login_code nor db.consume_oauth_state will return an expired row —
+    this is what keeps dead secrets from accumulating in the tables, not what
+    makes them dead.
+
+    Publishes (PUBLISH.md Part 3) get both halves of the same treatment: an
+    upload whose worker died is failed so the sheet watching it stops spinning,
+    and finished rows are reaped on the job TTL. Neither touches the video on
+    the channel or the clip in the library.
     """
     stalled = reconcile_stalled()
     if stalled:
         logger.info("reconciled %d stalled job(s)", stalled)
+    stalled_publishes = reconcile_stalled_publishes()
+    if stalled_publishes:
+        logger.info("reconciled %d stalled publish(es)", stalled_publishes)
     count = reap_expired()
     if count:
         logger.info("reaper removed %d expired job(s)", count)
@@ -935,4 +1178,10 @@ def reap_expired_task() -> int:
     expired_codes = purge_expired_login_codes()
     if expired_codes:
         logger.info("swept %d expired sign-in code(s)", expired_codes)
+    expired_states = purge_expired_oauth_states()
+    if expired_states:
+        logger.info("swept %d abandoned authorization(s)", expired_states)
+    expired_publishes = reap_expired_publishes()
+    if expired_publishes:
+        logger.info("reaped %d finished publish row(s)", expired_publishes)
     return count

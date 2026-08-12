@@ -309,6 +309,134 @@ class ClipDeletedResponse(BaseModel):
     ok: bool = True
 
 
+# --------------------------------------------------------------------------- #
+# Connected publishing accounts (PUBLISH.md Part 2).
+#
+# Read these as the enforcement of one rule: there is NO field on any model
+# below that a token could be put in. "Never returned by an endpoint" is a
+# property of the schema here, not a habit of the routes.
+# --------------------------------------------------------------------------- #
+
+
+class ConnectionOut(BaseModel):
+    """One connected channel, as the account page sees it.
+
+    `account_name` is what a creator recognises (their channel's title);
+    `account_id` is the provider's own id for it, carried so the UI can tell
+    two channels apart when somebody has connected more than one.
+    """
+
+    id: str
+    platform: str  # 'youtube' …
+    account_name: str = ""
+    account_id: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class PlatformOut(BaseModel):
+    """A platform the product knows about, and whether it can be connected.
+
+    Sent for every platform, connected or not, because PUBLISH.md's UI rule is
+    that nothing may offer a platform which cannot currently complete a post —
+    and the honest answer to "can it?" is a server-side fact (is there a token
+    key, a client id, a public URL, an approved review) rather than something
+    the frontend should be holding its own copy of.
+    """
+
+    platform: str
+    label: str
+    connectable: bool
+    # Why not, in words a creator reads. '' when it can be connected.
+    reason: str = ""
+    # The standing caveat about posting here — for YouTube, that uploads land
+    # as private until Google's review completes. Shown either way.
+    note: str = ""
+    # Is there an adapter in this build that can actually complete a post
+    # (PUBLISH.md Part 3)? Connectable and publishable are different questions:
+    # a platform could be connected for reading long before it can be posted
+    # to, and the Post button follows THIS one.
+    publishable: bool = False
+    # The visibilities a post here may be given, in the order to show them.
+    # A single entry means there is no choice — which is the honest state while
+    # Google's review is outstanding, and the reason this is a list rather than
+    # a boolean: a UI that renders the list cannot offer an option the server
+    # would silently override.
+    privacy_choices: list[str] = Field(default_factory=list)
+    # Set when the platform allows no choice at all, and to the value it
+    # forces. '' when the user's pick stands.
+    forced_privacy: str = ""
+
+
+class ConnectionListResponse(BaseModel):
+    connections: list[ConnectionOut] = Field(default_factory=list)
+    platforms: list[PlatformOut] = Field(default_factory=list)
+
+
+class ConnectionStartResponse(BaseModel):
+    """Where to send the browser. The state and PKCE challenge are inside it."""
+
+    authorize_url: str
+
+
+class ConnectionDeletedResponse(BaseModel):
+    ok: bool = True
+
+
+# --------------------------------------------------------------------------- #
+# Posting a clip to a connected channel (PUBLISH.md Part 3).
+# --------------------------------------------------------------------------- #
+
+
+class PublishClipRequest(BaseModel):
+    """``POST /v1/clips/{id}/publish`` — post this clip to a connected channel.
+
+    `title` and `description` are what the sheet's two fields hold; both may be
+    empty, and what an empty one means is the adapter's rule (the clip's own
+    title, and its top hook) rather than a client-side default, so the same
+    post is produced whoever is calling.
+
+    `privacy` is a REQUEST. What actually happens is the platform's capability
+    resolved against it — forced to `private` while Google's review is
+    outstanding — and the response says which it was.
+    """
+
+    platform: str = Field(default="youtube", min_length=1, max_length=32)
+    title: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=5000)
+    privacy: Literal["public", "unlisted", "private"] = "private"
+
+
+class PublishJobOut(BaseModel):
+    """One publish attempt, as the sheet polling it sees it.
+
+    The same shape as a render job's status for the same reason: it is the same
+    kind of thing to a browser — a status, a fraction, a line of prose, and an
+    error written to be read. There is no field here a token could go in; the
+    row it is built from has none either.
+    """
+
+    id: str
+    clip_id: str
+    platform: str
+    status: str  # queued | uploading | done | failed
+    progress: float = 0.0
+    detail: str = ""
+    error: str | None = None
+    # What was asked for, and what the platform's capability made of it.
+    title: str = ""
+    privacy: str = "private"
+    # Only once it has landed — the link the UI offers when the post is done.
+    video_id: str | None = None
+    video_url: str | None = None
+    # The standing caveat for this platform (uploads land private, …), carried
+    # on the job so the sheet can keep saying it while the upload runs.
+    note: str = ""
+    created_at: str
+    updated_at: str
+
+
 class CheckoutRequest(BaseModel):
     # A plan NAME, validated in the route (unknown/free → 400, not 422) and
     # mapped to a server-configured price id — clients never send price ids.
